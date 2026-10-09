@@ -133,3 +133,237 @@
 @font-face { font-family: "Poppins"; src: url("/fonts/Poppins-Bold.ttf"); font-weight: 700; }
 
 @utility font-invoice { font-family: "Poppins", sans-serif; }
+
+.invoice-sheet {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  isolation: isolate;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 11mm 9mm 10mm;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 4px 24px rgb(15 23 42 / 12%);
+  font-family: "Poppins", Arial, sans-serif;
+}
+
+.invoice-header {
+  display: flex;
+  align-items: center;
+  min-height: 38mm;
+}
+
+.invoice-logo {
+  width: 30mm;
+  height: 30mm;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.invoice-company {
+  flex: 1;
+  padding: 0 30mm 0 3mm;
+  text-align: center;
+}
+
+.invoice-company h1 {
+  margin: 0 0 2mm;
+  font-size: 25px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.invoice-company p {
+  margin: 0 0 1mm;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.invoice-rule {
+  border-top: 1px solid #222;
+  margin: 1mm 0 4mm;
+}
+
+.invoice-recipient {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin: 0 3mm 18mm;
+  min-height: 14mm;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.invoice-recipient-name {
+  margin-top: 1mm;
+}
+
+.invoice-meta {
+  text-align: right;
+}
+
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: #111;
+  font-size: 11px;
+}
+
+.invoice-no-col { width: 5%; }
+.invoice-car-col { width: 16%; }
+.invoice-plate-col { width: 11%; }
+.invoice-date-col { width: 13%; }
+.invoice-route-col { width: 18%; }
+.invoice-service-col { width: 17%; }
+.invoice-days-col { width: 8%; }
+.invoice-total-col { width: 12%; }
+
+.invoice-table th,
+.invoice-table td {
+  border: 0.6px solid #222;
+  padding: 1.5mm 0.8mm;
+  overflow-wrap: anywhere;
+  text-align: center;
+  vertical-align: middle;
+  font-weight: 400;
+}
+
+.invoice-table thead th {
+  font-weight: 600;
+}
+
+.invoice-table tbody tr {
+  height: 8mm;
+}
+
+.invoice-table tfoot tr {
+  height: 8mm;
+}
+
+.invoice-table tfoot th {
+  font-weight: 600;
+  text-align: right;
+}
+
+.invoice-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: auto;
+  margin-bottom: 14mm;
+}
+
+.invoice-bank-box {
+  width: 43mm;
+  padding: 2.5mm;
+  border: 0.8px solid #222;
+  border-radius: 3mm;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.invoice-bank-entry + .invoice-bank-entry {
+  margin-top: 2mm;
+}
+
+.invoice-bank-entry strong,
+.invoice-bank-entry span {
+  display: block;
+}
+
+.invoice-signature {
+  display: flex;
+  position: relative;
+  width: 52mm;
+  flex-direction: column;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.invoice-signature-watermark {
+  position: absolute !important;
+  z-index: 0;
+  top: 50%;
+  left: 50%;
+  width: 38mm !important;
+  height: 38mm !important;
+  max-width: none !important;
+  transform: translate(-50%, -50%);
+  object-fit: contain;
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+.invoice-signature > :not(.invoice-signature-watermark) {
+  position: relative;
+  z-index: 1;
+}
+
+.invoice-signature > img:not(.invoice-signature-watermark) {
+  width: 42mm;
+  height: 22mm;
+  object-fit: contain;
+}
+
+.invoice-thanks {
+  margin-top: 0;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 !important;
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #invoice-print-root,
+  #invoice-print-root * {
+    visibility: visible !important;
+  }
+
+  #invoice-print-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 210mm;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: #fff;
+    box-shadow: none;
+  }
+
+  #invoice-print-root .invoice-preview-toolbar {
+    display: none !important;
+  }
+
+  #invoice-print-root .invoice-sheet {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0;
+    box-shadow: none;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    page-break-after: avoid;
+  }
+}
