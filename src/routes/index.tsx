@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { pdf, Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
+import { Buffer } from "buffer/";
 import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_LOGO,
@@ -141,7 +142,7 @@ function emitDownload(filename: string, blob: Blob) {
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function InvoicePDFDocument({
@@ -559,6 +560,9 @@ function Index() {
     if (!form.invoice_number.trim()) {
       window.alert("Nomor invoice wajib diisi sebelum unduh PDF.");
       return;
+    }
+    if (typeof globalThis.Buffer === "undefined") {
+      globalThis.Buffer = Buffer;
     }
     const blob = await pdf(<InvoicePDFDocument invoice={form} company={companySettings} />).toBlob();
     emitDownload(invoiceFilename(form.invoice_number, form.client_name), blob);
@@ -1092,7 +1096,7 @@ const styles = StyleSheet.create({
   cell: {
     fontSize: 11,
     textAlign: "center",
-    paddingVertical: 8,
+    paddingVertical: 4,
     paddingHorizontal: 2,
     borderWidth: 0.4,
     borderColor: "#222222",
