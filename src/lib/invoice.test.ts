@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { formatRupiah, grandTotal, invoiceFilename, lineTotal, parseRupiah, formatDateID } from "./invoice";
+import {
+  addDaysToISODate,
+  formatDateID,
+  formatDateRangeID,
+  formatRupiah,
+  grandTotal,
+  inclusiveDaysBetween,
+  invoiceFilename,
+  lineTotal,
+  parseRupiah,
+} from "./invoice";
 
 describe("invoice rules", () => {
   it("line total = days × price per day", () => {
@@ -20,6 +30,13 @@ describe("invoice rules", () => {
   it("formats Indonesian dates", () => {
     expect(formatDateID("2026-10-09")).toBe("9 Okt 2026");
     expect(formatDateID("2026-10-09", true)).toBe("09 Okt 2026");
+  });
+  it("calculates and formats inclusive service date ranges", () => {
+    expect(addDaysToISODate("2026-10-09", 2)).toBe("2026-10-11");
+    expect(inclusiveDaysBetween("2026-10-09", "2026-10-11")).toBe(3);
+    expect(inclusiveDaysBetween("2026-10-11", "2026-10-09")).toBe(0);
+    expect(formatDateRangeID("2026-10-09", 3, true)).toBe("09-11 Okt 2026");
+    expect(formatDateRangeID("2026-10-09", 1, true)).toBe("09 Okt 2026");
   });
   it("builds a clean filename", () => {
     expect(invoiceFilename("15905", "AstrindoTravel Cab Bidakara")).toBe("Invoice-15905-AstrindoTravel.pdf");

@@ -4,14 +4,33 @@ import { DEFAULT_LOGO, DEFAULT_SIGNATURE, newItem } from "./invoice";
 
 /** Turn backend errors into safe Indonesian messages. */
 export function friendlyError(err: unknown): string {
-  const e = err as { code?: string; message?: string } | null;
+  const e = err as { code?: string; message?: string; status?: number } | null;
+  if (typeof err === "string") return err;
+  if (err instanceof Error && !e?.message) return err.message;
   const msg = e?.message ?? "";
+  if (/invalid login credentials/i.test(msg))
+    return "Email atau kata sandi salah, atau akun belum terdaftar. Periksa kembali atau pilih Daftar.";
+  if (/email not confirmed/i.test(msg))
+    return "Email belum diverifikasi. Buka tautan verifikasi yang dikirim Supabase ke email Anda.";
+  if (/user already registered|user_already_exists/i.test(msg))
+    return "Email ini sudah terdaftar. Kembali ke halaman Masuk dan gunakan akun tersebut.";
+  if (/password.*(least|minimum|characters)|weak password/i.test(msg))
+    return "Kata sandi terlalu pendek atau lemah. Gunakan minimal 6 karakter.";
+  if (/signup is disabled|signups not allowed|registration.*disabled/i.test(msg))
+    return "Pendaftaran akun baru sedang dinonaktifkan di Supabase. Aktifkan Sign ups pada Authentication > Settings.";
+  if (/email rate limit|rate limit.*email/i.test(msg))
+    return "Terlalu banyak permintaan email verifikasi. Tunggu beberapa menit lalu coba lagi.";
+  if (/invalid api key|invalid jwt/i.test(msg) || e?.status === 401)
+    return "Kunci Supabase tidak cocok atau sudah tidak berlaku. Periksa URL dan publishable key pada environment aplikasi.";
+  if (/PGRST202|PGRST205|42P01|42883|schema cache|could not find the function|relation .* does not exist/i.test(msg))
+    return "Struktur database Supabase belum lengkap. Jalankan ulang migrasi database yang disediakan proyek.";
   if (e?.code === "23505" || /duplicate key/i.test(msg)) return "Nomor sudah digunakan. Gunakan nomor lain.";
   if (/Akses ditolak|permission denied|row-level security/i.test(msg))
     return "Anda tidak memiliki akses untuk tindakan ini.";
   if (/Nomor invoice final/i.test(msg)) return "Nomor invoice final tidak dapat diubah.";
   if (/Jumlah hari|Harga tidak valid|Minimal satu baris|tidak ditemukan/i.test(msg)) return msg;
   if (/Failed to fetch|NetworkError/i.test(msg)) return "Koneksi bermasalah. Periksa internet Anda.";
+  if (!msg) return "Supabase tidak mengembalikan pesan kesalahan. Periksa koneksi dan konfigurasi aplikasi.";
   return "Terjadi kesalahan. Silakan coba lagi.";
 }
 
@@ -71,10 +90,12 @@ export async function listClients(): Promise<Client[]> {
 }
 export async function saveClient(c: Omit<Client, "id"> & { id?: string }) {
   const { id, ...rest } = c;
-  const { error } = id
-    ? await supabase.from("clients").update(rest).eq("id", id)
-    : await supabase.from("clients").insert(rest);
+  const { data, error } = id
+    ? await supabase.from("clients").update(rest).eq("id", id).select("id").single()
+    : await supabase.from("clients").insert(rest).select("id").single();
   throwIf(error);
+  if (!data) throw new Error("Data klien tidak berhasil disimpan");
+  return data.id;
 }
 export async function deleteClient(id: string) {
   const { error } = await supabase.from("clients").delete().eq("id", id);
@@ -90,10 +111,12 @@ export async function listVehicles(): Promise<Vehicle[]> {
 }
 export async function saveVehicle(v: Omit<Vehicle, "id"> & { id?: string }) {
   const { id, ...rest } = v;
-  const { error } = id
-    ? await supabase.from("vehicles").update(rest).eq("id", id)
-    : await supabase.from("vehicles").insert(rest);
+  const { data, error } = id
+    ? await supabase.from("vehicles").update(rest).eq("id", id).select("id").single()
+    : await supabase.from("vehicles").insert(rest).select("id").single();
   throwIf(error);
+  if (!data) throw new Error("Data kendaraan tidak berhasil disimpan");
+  return data.id;
 }
 export async function deleteVehicle(id: string) {
   const { error } = await supabase.from("vehicles").delete().eq("id", id);
@@ -175,12 +198,57 @@ export async function getInvoice(id: string): Promise<InvoiceInput & { id: strin
   };
 }
 
+export async function listAllInvoices(): Promise<
+  (InvoiceInput & { id: string; createdAt: string; updatedAt: string })[]
+> {
+  const { data, error } = await supabase
+    .from("invoices")
+    .select("*, invoice_items(*)")
+    .order("invoice_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  throwIf(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    invoice_number: row.invoice_number,
+    invoice_date: row.invoice_date,
+    city: row.city,
+    client_id: row.client_id,
+    client_name: row.client_name,
+    pic_name: row.pic_name ?? "",
+    client_address: row.client_address ?? "",
+    notes: row.notes ?? "",
+    status: row.status === "final" ? "final" : "draft",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    items: [...(row.invoice_items ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({
+        ...newItem(),
+        vehicle_id: item.vehicle_id,
+        car_type: item.car_type,
+        plate_number: item.plate_number ?? "",
+        service_date: item.service_date ?? "",
+        route: item.route ?? "",
+        service_type: item.service_type ?? "",
+        days: item.days,
+        price_per_day: Number(item.price_per_day),
+      })),
+  }));
+}
+
 export async function isInvoiceNumberTaken(num: string, excludeId?: string): Promise<boolean> {
   let q = supabase.from("invoices").select("id").eq("invoice_number", num.trim());
   if (excludeId) q = q.neq("id", excludeId);
   const { data, error } = await q.limit(1);
   throwIf(error);
   return (data?.length ?? 0) > 0;
+}
+
+export async function nextInvoiceNumber(): Promise<string> {
+  const { data, error } = await supabase.rpc("next_invoice_number");
+  throwIf(error);
+  if (!data) throw new Error("Nomor invoice berikutnya tidak berhasil dibuat");
+  return data;
 }
 
 export async function saveInvoice(inv: InvoiceInput): Promise<string> {
@@ -218,9 +286,11 @@ export async function deleteInvoice(id: string) {
 
 // ---------- Users / roles ----------
 export async function getMyRole(): Promise<"admin" | "staff" | null> {
-  const { data: u } = await supabase.auth.getUser();
+  const { data: u, error: userError } = await supabase.auth.getUser();
+  throwIf(userError);
   if (!u.user) return null;
-  const { data } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
+  const { data, error } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
+  throwIf(error);
   const roles = (data ?? []).map((r) => r.role);
   if (roles.includes("admin")) return "admin";
   if (roles.includes("staff")) return "staff";

@@ -70,6 +70,37 @@ export function formatDateID(iso: string, pad = false): string {
   return `${day} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+export function addDaysToISODate(iso: string, days: number): string {
+  const date = parseISODate(iso);
+  if (!date || !Number.isInteger(days)) return "";
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function inclusiveDaysBetween(start: string, end: string): number {
+  const startDate = parseISODate(start);
+  const endDate = parseISODate(end);
+  if (!startDate || !endDate) return 0;
+  const startUtc = Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+  const endUtc = Date.UTC(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+  const days = Math.floor((endUtc - startUtc) / 86_400_000) + 1;
+  return days > 0 ? days : 0;
+}
+
+export function formatDateRangeID(start: string, days: number, pad = false): string {
+  const startLabel = formatDateID(start, pad);
+  if (!startLabel || days <= 1) return startLabel;
+  const endLabel = formatDateID(addDaysToISODate(start, days - 1), pad);
+  if (!endLabel) return startLabel;
+  const [startDay, startMonth, startYear] = startLabel.split(" ");
+  const [endDay, endMonth, endYear] = endLabel.split(" ");
+  if (startMonth === endMonth && startYear === endYear)
+    return `${startDay}-${endDay} ${endMonth} ${endYear}`;
+  if (startYear === endYear)
+    return `${startDay} ${startMonth} - ${endDay} ${endMonth} ${endYear}`;
+  return `${startLabel} - ${endLabel}`;
+}
+
 export function todayISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

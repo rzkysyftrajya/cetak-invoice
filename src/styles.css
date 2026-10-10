@@ -214,11 +214,11 @@
 }
 
 .invoice-no-col { width: 5%; }
-.invoice-car-col { width: 16%; }
-.invoice-plate-col { width: 11%; }
-.invoice-date-col { width: 13%; }
-.invoice-route-col { width: 18%; }
-.invoice-service-col { width: 17%; }
+.invoice-car-col { width: 14%; }
+.invoice-plate-col { width: 10%; }
+.invoice-date-col { width: 20%; }
+.invoice-route-col { width: 15%; }
+.invoice-service-col { width: 16%; }
 .invoice-days-col { width: 8%; }
 .invoice-total-col { width: 12%; }
 

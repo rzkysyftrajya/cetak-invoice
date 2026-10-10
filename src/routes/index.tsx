@@ -1,16 +1,36 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { pdf, Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 import { Buffer } from "buffer/";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "../integrations/supabase/client";
+import {
+  deleteInvoice as deleteCloudInvoice,
+  friendlyError,
+  getMyRole,
+  getSettings,
+  listAllInvoices,
+  listClients,
+  listVehicles,
+  nextInvoiceNumber,
+  saveClient,
+  saveInvoice as saveCloudInvoice,
+  saveVehicle,
+  updateSettings,
+} from "../lib/api";
 import {
   DEFAULT_LOGO,
   DEFAULT_SIGNATURE,
+  addDaysToISODate,
   emptyInvoice,
   formatDateID,
+  formatDateRangeID,
   formatRupiah,
   grandTotal,
+  inclusiveDaysBetween,
   invoiceFilename,
   lineTotal,
+  newItem,
   parseRupiah,
   type CompanySettings,
   type InvoiceInput,
@@ -39,6 +59,7 @@ type VehicleRecord = {
 type InvoiceRecord = InvoiceInput & { id: string; createdAt: string; updatedAt: string };
 
 type NavKey = "dashboard" | "create" | "history" | "clients" | "vehicles" | "settings";
+type UserRole = "admin" | "staff";
 
 const STORAGE_KEYS = {
   invoices: "vrn.invoices",
@@ -64,30 +85,8 @@ const defaultCompanySettings: CompanySettings = {
   signature_path: DEFAULT_SIGNATURE,
 };
 
-const defaultClients: ClientRecord[] = [
-  {
-    id: "client-1",
-    company: "Astrindo Travel",
-    pic: "Rina Putri",
-    phone: "081234567890",
-    email: "rina@astrindo.id",
-    address: "Jl. Gatot Subroto No. 89, Medan",
-  },
-  {
-    id: "client-2",
-    company: "Sinar Mandiri",
-    pic: "Budi Santoso",
-    phone: "085678912345",
-    email: "budi@sinar.id",
-    address: "Jl. Imam Bonjol No. 55, Jakarta",
-  },
-];
-
-const defaultVehicles: VehicleRecord[] = [
-  { id: "vehicle-1", type: "Toyota Avanza", plateNumber: "BK 1234 AB", defaultPrice: 550000 },
-  { id: "vehicle-2", type: "Honda BR-V", plateNumber: "BK 5678 CD", defaultPrice: 700000 },
-  { id: "vehicle-3", type: "Isuzu Elf", plateNumber: "BK 9012 EF", defaultPrice: 1100000 },
-];
+const sampleClientIds = new Set(["client-1", "client-2"]);
+const sampleVehicleIds = new Set(["vehicle-1", "vehicle-2", "vehicle-3"]);
 
 function readStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -99,25 +98,11 @@ function readStorage<T>(key: string, fallback: T): T {
   }
 }
 
-function writeStorage<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
-}
-
 function makeId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function buildDefaultInvoiceNumber(invoices: InvoiceRecord[]): string {
-  const values = invoices
-    .map((invoice) => Number(String(invoice.invoice_number).replace(/\D/g, "")))
-    .filter((item) => Number.isFinite(item) && item > 0)
-    .sort((a, b) => b - a);
-  const next = values[0] ? values[0] + 1 : 15905;
-  return String(next);
 }
 
 function emptyFormState(city = "Jakarta"): InvoiceInput {
@@ -203,7 +188,7 @@ function InvoicePDFDocument({
                 <Text style={[styles.cell, styles.carCol]}>{item?.car_type || ""}</Text>
                 <Text style={[styles.cell, styles.plateCol]}>{item?.plate_number || ""}</Text>
                 <Text style={[styles.cell, styles.dateCol]}>
-                  {item ? formatDateID(item.service_date, true) : ""}
+                  {item ? formatDateRangeID(item.service_date, item.days, true) : ""}
                 </Text>
                 <Text style={[styles.cell, styles.routeCol]}>{item?.route || ""}</Text>
                 <Text style={[styles.cell, styles.serviceCol]}>{item?.service_type || ""}</Text>
@@ -311,7 +296,7 @@ function InvoicePreview({ invoice, company }: { invoice: InvoiceInput; company: 
                 <td>{item ? index + 1 : ""}</td>
                 <td>{item?.car_type || ""}</td>
                 <td>{item?.plate_number || ""}</td>
-                <td>{item ? formatDateID(item.service_date, true) : ""}</td>
+                <td>{item ? formatDateRangeID(item.service_date, item.days, true) : ""}</td>
                 <td>{item?.route || ""}</td>
                 <td>{item?.service_type || ""}</td>
                 <td>{item?.days || ""}</td>
@@ -359,11 +344,25 @@ function InvoicePreview({ invoice, company }: { invoice: InvoiceInput; company: 
 }
 
 function Index() {
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [role, setRole] = useState<UserRole | null>(null);
+  const [roleCheckedFor, setRoleCheckedFor] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [cloudError, setCloudError] = useState("");
+  const [authForm, setAuthForm] = useState({ email: "", password: "" });
+  const [authPending, setAuthPending] = useState(false);
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [localImportCount, setLocalImportCount] = useState(0);
+  const [importPending, setImportPending] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavKey>("dashboard");
-  const [companySettings, setCompanySettings] = useState<CompanySettings>(() => readStorage(STORAGE_KEYS.settings, defaultCompanySettings));
-  const [clients, setClients] = useState<ClientRecord[]>(() => readStorage(STORAGE_KEYS.clients, defaultClients));
-  const [vehicles, setVehicles] = useState<VehicleRecord[]>(() => readStorage(STORAGE_KEYS.vehicles, defaultVehicles));
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>(() => readStorage(STORAGE_KEYS.invoices, []) as InvoiceRecord[]);
+  const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
+  const [clients, setClients] = useState<ClientRecord[]>([]);
+  const [vehicles, setVehicles] = useState<VehicleRecord[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [form, setForm] = useState<InvoiceInput>(() => emptyFormState("Jakarta"));
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -375,20 +374,87 @@ function Index() {
   const [printWhenReady, setPrintWhenReady] = useState(false);
 
   useEffect(() => {
-    writeStorage(STORAGE_KEYS.settings, companySettings);
-  }, [companySettings]);
+    let active = true;
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAuthError(friendlyError(error));
+      setSession(data.session);
+      setAuthLoading(false);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setAuthError(friendlyError(error));
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
-    writeStorage(STORAGE_KEYS.clients, clients);
-  }, [clients]);
+    if (!session?.user.id) {
+      setRole(null);
+      setRoleCheckedFor(null);
+      setClients([]);
+      setVehicles([]);
+      setInvoices([]);
+      setLocalImportCount(0);
+      return;
+    }
 
-  useEffect(() => {
-    writeStorage(STORAGE_KEYS.vehicles, vehicles);
-  }, [vehicles]);
+    let active = true;
+    setCloudLoading(true);
+    setCloudError("");
+    void (async () => {
+      try {
+        const nextRole = await getMyRole();
+        if (!active) return;
+        setRole(nextRole);
+        setRoleCheckedFor(session.user.id);
+        if (!nextRole) return;
 
-  useEffect(() => {
-    writeStorage(STORAGE_KEYS.invoices, invoices);
-  }, [invoices]);
+        const [settings, cloudClients, cloudVehicles, cloudInvoices] = await Promise.all([
+          getSettings(),
+          listClients(),
+          listVehicles(),
+          listAllInvoices(),
+        ]);
+        if (!active) return;
+        setCompanySettings(settings);
+        setClients(cloudClients.map((client) => ({
+          id: client.id,
+          company: client.company_name,
+          pic: client.pic_name ?? "",
+          phone: client.phone ?? "",
+          email: client.email ?? "",
+          address: client.address ?? "",
+        })));
+        setVehicles(cloudVehicles.map((vehicle) => ({
+          id: vehicle.id,
+          type: vehicle.car_type,
+          plateNumber: vehicle.plate_number,
+          defaultPrice: Number(vehicle.default_price ?? 0),
+        })));
+        setInvoices(cloudInvoices);
+        const localInvoices = readStorage<InvoiceRecord[]>(STORAGE_KEYS.invoices, []);
+        const cloudNumbers = new Set(cloudInvoices.map((invoice) => invoice.invoice_number));
+        setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
+      } catch (error) {
+        if (active) {
+          setRoleCheckedFor(session.user.id);
+          setCloudError(friendlyError(error));
+        }
+      } finally {
+        if (active) setCloudLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [session?.user.id, reloadKey]);
 
   useEffect(() => {
     if (!printWhenReady || !showPreview) return;
@@ -450,13 +516,37 @@ function Index() {
     }));
   }
 
+  function updateServiceDate(index: number, field: "start" | "end", value: string) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        const startDate = field === "start" ? value : item.service_date;
+        const endDate =
+          field === "end" ? value : addDaysToISODate(item.service_date, item.days - 1);
+        if (
+          field === "end" &&
+          (!startDate || inclusiveDaysBetween(startDate, endDate) > 365)
+        )
+          return item;
+        if (field === "start" && !startDate) return { ...item, service_date: "" };
+        const days = inclusiveDaysBetween(startDate, endDate);
+        return {
+          ...item,
+          service_date: startDate,
+          days: days > 0 ? Math.min(days, 365) : 1,
+        };
+      }),
+    }));
+  }
+
   function addItemRow() {
     setForm((current) => ({
       ...current,
       items: [
         ...current.items,
         {
-          ...emptyInvoice(current.city).items[0],
+          ...newItem(),
           key: makeId("item"),
           service_date: current.invoice_date,
         },
@@ -472,19 +562,23 @@ function Index() {
   }
 
   function resetForm() {
-    const draft = emptyFormState("Jakarta");
+    const draft = emptyFormState(companySettings.default_city);
     setForm(draft);
     setSelectedInvoiceId(null);
     setShowPreview(false);
   }
 
-  function createNewInvoice() {
-    const draft = emptyFormState("Jakarta");
-    draft.invoice_number = buildDefaultInvoiceNumber(invoices);
-    setForm(draft);
-    setSelectedInvoiceId(null);
-    setShowPreview(false);
-    setActiveTab("create");
+  async function createNewInvoice() {
+    try {
+      const draft = emptyFormState(companySettings.default_city);
+      draft.invoice_number = await nextInvoiceNumber();
+      setForm(draft);
+      setSelectedInvoiceId(null);
+      setShowPreview(false);
+      setActiveTab("create");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    }
   }
 
   function loadEditInvoice(invoice: InvoiceRecord) {
@@ -499,21 +593,25 @@ function Index() {
     setActiveTab("create");
   }
 
-  function duplicateInvoice(invoice: InvoiceRecord) {
-    const duplicate = {
-      ...invoice,
-      id: undefined,
-      invoice_number: buildDefaultInvoiceNumber(invoices),
-      status: "draft",
-      items: invoice.items.map((item) => ({ ...item, key: makeId("item") })),
-    } as InvoiceInput;
-    setForm(duplicate);
-    setSelectedInvoiceId(null);
-    setShowPreview(false);
-    setActiveTab("create");
+  async function duplicateInvoice(invoice: InvoiceRecord) {
+    const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...source } = invoice;
+    try {
+      const duplicate: InvoiceInput = {
+        ...source,
+        invoice_number: await nextInvoiceNumber(),
+        status: "draft",
+        items: invoice.items.map((item) => ({ ...item, key: makeId("item") })),
+      };
+      setForm(duplicate);
+      setSelectedInvoiceId(null);
+      setShowPreview(false);
+      setActiveTab("create");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    }
   }
 
-  function saveInvoice() {
+  async function saveInvoice() {
     const cleanNumber = form.invoice_number.trim();
     if (!cleanNumber) {
       window.alert("Nomor invoice wajib diisi.");
@@ -523,8 +621,8 @@ function Index() {
       window.alert("Nama perusahaan atau klien wajib diisi.");
       return;
     }
-    if (form.items.some((item) => !item.car_type.trim() || item.days <= 0 || item.price_per_day < 0)) {
-      window.alert("Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, hari, dan harga per hari.");
+    if (form.items.some((item) => !item.car_type.trim() || !item.service_date || item.days <= 0 || item.days > 365 || item.price_per_day < 0)) {
+      window.alert("Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, rentang tanggal, hari, dan harga per hari.");
       return;
     }
 
@@ -534,26 +632,25 @@ function Index() {
       return;
     }
 
-    const now = new Date().toISOString();
-    const record: InvoiceRecord = {
-      ...(form as InvoiceInput),
-      id: selectedInvoiceId ?? makeId("invoice"),
-      createdAt: selectedInvoiceId ? invoices.find((invoice) => invoice.id === selectedInvoiceId)?.createdAt ?? now : now,
-      updatedAt: now,
-    };
-
-    setInvoices((current) => {
-      const exists = current.some((invoice) => invoice.id === record.id);
-      if (exists) {
-        return current.map((invoice) => (invoice.id === record.id ? record : invoice));
-      }
-      return [record, ...current];
-    });
-
-    setSelectedInvoiceId(record.id);
-    setShowPreview(true);
-    setActiveTab("history");
-    window.alert("Invoice berhasil disimpan.");
+    setInvoiceSaving(true);
+    try {
+      const invoiceToSave: InvoiceInput = {
+        ...form,
+        invoice_number: cleanNumber,
+      };
+      if (selectedInvoiceId) invoiceToSave.id = selectedInvoiceId;
+      const recordId = await saveCloudInvoice(invoiceToSave);
+      const cloudInvoices = await listAllInvoices();
+      setInvoices(cloudInvoices);
+      setSelectedInvoiceId(recordId);
+      setShowPreview(true);
+      setActiveTab("history");
+      window.alert("Invoice berhasil disimpan ke Supabase.");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    } finally {
+      setInvoiceSaving(false);
+    }
   }
 
   async function downloadPdf() {
@@ -562,7 +659,7 @@ function Index() {
       return;
     }
     if (typeof globalThis.Buffer === "undefined") {
-      globalThis.Buffer = Buffer;
+      Object.defineProperty(globalThis, "Buffer", { configurable: true, value: Buffer });
     }
     const blob = await pdf(<InvoicePDFDocument invoice={form} company={companySettings} />).toBlob();
     emitDownload(invoiceFilename(form.invoice_number, form.client_name), blob);
@@ -573,46 +670,144 @@ function Index() {
     setPrintWhenReady(true);
   }
 
-  function deleteInvoice(id: string) {
+  async function deleteInvoice(id: string) {
     const invoice = invoices.find((item) => item.id === id);
     if (!invoice) return;
     if (!window.confirm(`Hapus invoice ${invoice.invoice_number}?`)) return;
-    setInvoices((current) => current.filter((item) => item.id !== id));
-    if (selectedInvoiceId === id) resetForm();
+    try {
+      await deleteCloudInvoice(id);
+      setInvoices((current) => current.filter((item) => item.id !== id));
+      if (selectedInvoiceId === id) resetForm();
+    } catch (error) {
+      window.alert(friendlyError(error));
+    }
   }
 
-  function addClient() {
+  async function addClient() {
     if (!clientForm.company.trim() || !clientForm.pic.trim()) {
       window.alert("Nama perusahaan dan PIC wajib diisi.");
       return;
     }
-    const nextClient: ClientRecord = {
-      id: makeId("client"),
-      company: clientForm.company.trim(),
-      pic: clientForm.pic.trim(),
-      phone: clientForm.phone.trim(),
-      email: clientForm.email.trim(),
-      address: clientForm.address.trim(),
-    };
-    setClients((current) => [nextClient, ...current]);
-    setClientForm({ company: "", pic: "", phone: "", email: "", address: "" });
-    window.alert("Data klien berhasil disimpan.");
+    try {
+      const client = {
+        company_name: clientForm.company.trim(),
+        pic_name: clientForm.pic.trim(),
+        phone: clientForm.phone.trim(),
+        email: clientForm.email.trim(),
+        address: clientForm.address.trim(),
+      };
+      const id = await saveClient(client);
+      setClients((current) => [{
+        id,
+        company: client.company_name,
+        pic: client.pic_name,
+        phone: client.phone,
+        email: client.email,
+        address: client.address,
+      }, ...current]);
+      setClientForm({ company: "", pic: "", phone: "", email: "", address: "" });
+      window.alert("Data klien berhasil disimpan ke Supabase.");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    }
   }
 
-  function addVehicle() {
-    if (!vehicleForm.type.trim()) {
-      window.alert("Jenis mobil wajib diisi.");
+  async function addVehicle() {
+    if (!vehicleForm.type.trim() || !vehicleForm.plateNumber.trim()) {
+      window.alert("Jenis mobil dan nomor polisi wajib diisi.");
       return;
     }
-    const nextVehicle: VehicleRecord = {
-      id: makeId("vehicle"),
-      type: vehicleForm.type.trim(),
-      plateNumber: vehicleForm.plateNumber.trim(),
-      defaultPrice: parseRupiah(vehicleForm.defaultPrice || "0"),
-    };
-    setVehicles((current) => [nextVehicle, ...current]);
-    setVehicleForm({ type: "", plateNumber: "", defaultPrice: "" });
-    window.alert("Data kendaraan berhasil disimpan.");
+    try {
+      const vehicle = {
+        car_type: vehicleForm.type.trim(),
+        plate_number: vehicleForm.plateNumber.trim(),
+        default_price: parseRupiah(vehicleForm.defaultPrice || "0"),
+      };
+      const id = await saveVehicle(vehicle);
+      setVehicles((current) => [{
+        id,
+        type: vehicle.car_type,
+        plateNumber: vehicle.plate_number,
+        defaultPrice: vehicle.default_price,
+      }, ...current]);
+      setVehicleForm({ type: "", plateNumber: "", defaultPrice: "" });
+      window.alert("Data kendaraan berhasil disimpan ke Supabase.");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    }
+  }
+
+  async function saveCompanySettings() {
+    setSettingsSaving(true);
+    try {
+      await updateSettings(companySettings);
+      window.alert("Pengaturan perusahaan berhasil disimpan ke Supabase.");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthError("");
+    setAuthPending(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authForm.email.trim(),
+        password: authForm.password,
+      });
+      if (error) throw error;
+      setSession(data.session);
+    } catch (error) {
+      setAuthError(friendlyError(error));
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  async function signOut() {
+    const { error } = await supabase.auth.signOut();
+    if (error) window.alert(friendlyError(error));
+  }
+
+  async function importLocalInvoices() {
+    const localInvoices = readStorage<InvoiceRecord[]>(STORAGE_KEYS.invoices, []);
+    const cloudNumbers = new Set(invoices.map((invoice) => invoice.invoice_number));
+    const toImport = localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number));
+    if (toImport.length === 0) {
+      setLocalImportCount(0);
+      return;
+    }
+    if (!window.confirm(`Impor ${toImport.length} invoice dari browser ini ke Supabase? Data lokal tidak akan dihapus.`)) return;
+
+    setImportPending(true);
+    let imported = 0;
+    const importedInvoices: InvoiceRecord[] = [];
+    try {
+      for (const invoice of toImport) {
+        const { id: _localId, createdAt: _createdAt, updatedAt: _updatedAt, ...invoiceData } = invoice;
+        const id = await saveCloudInvoice({
+          ...invoiceData,
+          client_id: null,
+          items: invoice.items.map((item) => ({ ...item, vehicle_id: null })),
+        });
+        const timestamp = new Date().toISOString();
+        importedInvoices.push({ ...invoice, id, client_id: null, createdAt: timestamp, updatedAt: timestamp });
+        cloudNumbers.add(invoice.invoice_number);
+        imported += 1;
+      }
+      setInvoices((current) => [...importedInvoices, ...current]);
+      setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
+      window.alert(`${imported} invoice berhasil diimpor. Data lokal tetap tersimpan di browser ini.`);
+    } catch (error) {
+      setInvoices((current) => [...importedInvoices, ...current]);
+      setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
+      window.alert(`${imported} invoice berhasil diimpor sebelum terjadi kesalahan: ${friendlyError(error)}. Anda dapat mencoba lagi untuk invoice yang belum masuk.`);
+    } finally {
+      setImportPending(false);
+    }
   }
 
   function applyVehicleToForm(vehicle: VehicleRecord, itemIndex: number) {
@@ -632,6 +827,104 @@ function Index() {
 
   function valueOfBank(account: BankAccount) {
     return `${account.bank} - ${account.name} (${account.number})`;
+  }
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted p-6 text-sm text-muted-foreground">
+        Memeriksa sesi Supabase...
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted p-5">
+        <form onSubmit={submitAuth} className="w-full max-w-md space-y-5 rounded-[28px] border border-border bg-white p-7 shadow-card">
+          <div>
+            <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Vicky Rental Nusantara</div>
+            <h1 className="mt-2 text-2xl font-bold text-foreground">Masuk ke Invoice</h1>
+          </div>
+          <label className="block space-y-2 text-sm">
+            <span className="font-medium text-foreground">Email</span>
+            <input
+              required
+              type="email"
+              autoComplete="email"
+              value={authForm.email}
+              onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+            />
+          </label>
+          <label className="block space-y-2 text-sm">
+            <span className="font-medium text-foreground">Kata sandi</span>
+            <input
+              required
+              type="password"
+              minLength={6}
+              autoComplete="current-password"
+              value={authForm.password}
+              onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+              className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+            />
+          </label>
+          {authError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{authError}</p>}
+          <button
+            type="submit"
+            disabled={authPending}
+            className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {authPending ? "Memproses..." : "Masuk"}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  if (!roleCheckedFor || roleCheckedFor !== session.user.id || cloudLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted p-6 text-sm text-muted-foreground">
+        Menghubungkan ke Supabase dan memuat data...
+      </div>
+    );
+  }
+
+  if (cloudError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted p-5">
+        <div className="w-full max-w-md space-y-4 rounded-[28px] border border-border bg-white p-7 shadow-card">
+          <h1 className="text-xl font-bold text-foreground">Data Supabase gagal dimuat</h1>
+          <p role="alert" className="text-sm text-muted-foreground">{cloudError}</p>
+          <button
+            type="button"
+            onClick={() => setReloadKey((value) => value + 1)}
+            className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
+          >
+            Coba lagi
+          </button>
+          <button type="button" onClick={signOut} className="w-full text-sm text-muted-foreground underline">Keluar</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!role) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted p-5">
+        <div className="w-full max-w-lg space-y-4 rounded-[28px] border border-border bg-white p-7 shadow-card">
+          <h1 className="text-xl font-bold text-foreground">Akun belum diberi akses</h1>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Anda berhasil masuk, tetapi akun ini belum memiliki peran admin/staf. Admin proyek dapat mengganti placeholder email lalu menjalankan perintah ini lewat Supabase SQL Editor:
+          </p>
+          <code className="block overflow-x-auto rounded-xl bg-muted p-3 text-xs">
+            insert into public.user_roles (user_id, role)<br />
+            select id, 'staff' from auth.users where email = '&lt;EMAIL_AKUN&gt;'<br />
+            on conflict (user_id, role) do nothing;
+          </code>
+          <button type="button" onClick={signOut} className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Keluar</button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -664,17 +957,44 @@ function Index() {
         <main className="flex-1 space-y-6">
           <div className="flex flex-col gap-3 rounded-[28px] border border-border bg-white p-5 shadow-card md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Dashboard admin</div>
               <h1 className="mt-2 text-3xl font-bold text-foreground">PT VICKY RENTAL NUSANTARA</h1>
             </div>
-            <button
-              type="button"
-              onClick={createNewInvoice}
-              className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              + Buat Invoice
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={createNewInvoice}
+                className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                + Buat Invoice
+              </button>
+              <button
+                type="button"
+                onClick={signOut}
+                className="rounded-xl border border-border px-4 py-3 text-sm font-medium text-foreground"
+              >
+                Keluar
+              </button>
+            </div>
           </div>
+
+          {localImportCount > 0 && (
+            <section className="flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-semibold text-amber-950">Ada {localImportCount} invoice lama di browser ini</div>
+                <p className="mt-1 text-amber-900">
+                  Impor jika ingin memindahkannya ke Supabase. Invoice lokal tidak akan dihapus.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={importPending}
+                onClick={importLocalInvoices}
+                className="shrink-0 rounded-xl bg-amber-900 px-4 py-2.5 font-semibold text-white disabled:opacity-60"
+              >
+                {importPending ? "Mengimpor..." : "Impor invoice lokal"}
+              </button>
+            </section>
+          )}
 
           {activeTab === "dashboard" && (
             <>
@@ -796,8 +1116,24 @@ function Index() {
                           <input value={item.plate_number} onChange={(event) => updateItem(index, "plate_number", event.target.value)} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
                         </label>
                         <label className="space-y-2 text-sm">
-                          <span className="font-medium text-foreground">Tanggal layanan</span>
-                          <input type="date" value={item.service_date} onChange={(event) => updateItem(index, "service_date", event.target.value)} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
+                          <span className="font-medium text-foreground">Tanggal dari</span>
+                          <input
+                            type="date"
+                            value={item.service_date}
+                            onChange={(event) => updateServiceDate(index, "start", event.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
+                        </label>
+                        <label className="space-y-2 text-sm">
+                          <span className="font-medium text-foreground">Tanggal sampai</span>
+                          <input
+                            type="date"
+                            value={addDaysToISODate(item.service_date, item.days - 1)}
+                            min={item.service_date || undefined}
+                            max={addDaysToISODate(item.service_date, 364) || undefined}
+                            onChange={(event) => updateServiceDate(index, "end", event.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Rute perjalanan</span>
@@ -805,14 +1141,22 @@ function Index() {
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Tipe layanan</span>
-                          <select value={item.service_type} onChange={(event) => updateItem(index, "service_type", event.target.value)} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring">
-                            <option value="Dengan Driver">Dengan Driver</option>
-                            <option value="Lepas Kunci">Lepas Kunci</option>
-                          </select>
+                          <input
+                            value={item.service_type}
+                            onChange={(event) => updateItem(index, "service_type", event.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Jumlah hari</span>
-                          <input type="number" min={1} value={item.days} onChange={(event) => updateItem(index, "days", Number(event.target.value))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
+                          <input
+                            type="number"
+                            min={1}
+                            max={365}
+                            value={item.days}
+                            onChange={(event) => updateItem(index, "days", Number(event.target.value))}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Harga per hari</span>
@@ -856,7 +1200,9 @@ function Index() {
 
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button type="button" onClick={() => setShowPreview(true)} className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Preview Invoice</button>
-                  <button type="button" onClick={saveInvoice} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white">Simpan Invoice</button>
+                  <button type="button" onClick={saveInvoice} disabled={invoiceSaving} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                    {invoiceSaving ? "Menyimpan..." : "Simpan Invoice"}
+                  </button>
                   <button type="button" onClick={downloadPdf} className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground">Download PDF</button>
                   <button type="button" onClick={printInvoice} className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground">Cetak Invoice</button>
                   <button type="button" onClick={resetForm} className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground">Reset Form</button>
@@ -1003,6 +1349,16 @@ function Index() {
                 </div>
                 <button type="button" onClick={() => setCompanySettings((current) => ({ ...current, bank_accounts: [...current.bank_accounts, { bank: "Bank Baru", name: "Nama", number: "000000" }] }))} className="mt-3 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold text-foreground">+ Tambah rekening</button>
               </div>
+              {role === "admin" && (
+                <button
+                  type="button"
+                  onClick={saveCompanySettings}
+                  disabled={settingsSaving}
+                  className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {settingsSaving ? "Menyimpan..." : "Simpan Pengaturan"}
+                </button>
+              )}
             </section>
           )}
 
@@ -1103,11 +1459,11 @@ const styles = StyleSheet.create({
     height: 28,
   },
   noCol: { width: "5%" },
-  carCol: { width: "16%" },
-  plateCol: { width: "11%" },
-  dateCol: { width: "13%" },
-  routeCol: { width: "18%" },
-  serviceCol: { width: "17%" },
+  carCol: { width: "14%" },
+  plateCol: { width: "10%" },
+  dateCol: { width: "20%" },
+  routeCol: { width: "15%" },
+  serviceCol: { width: "16%" },
   daysCol: { width: "8%" },
   totalCol: { width: "12%" },
   grandTotalRow: {
