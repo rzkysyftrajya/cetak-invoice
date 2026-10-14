@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { BankAccount, CompanySettings, InvoiceInput } from "./invoice";
-import { DEFAULT_LOGO, DEFAULT_SIGNATURE, newItem } from "./invoice";
+import { DEFAULT_LOGO, DEFAULT_SIGNATURE, newAdditionalCharge, newItem } from "./invoice";
 
 /** Turn backend errors into safe Indonesian messages. */
 export function friendlyError(err: unknown): string {
@@ -24,11 +24,14 @@ export function friendlyError(err: unknown): string {
     return "Kunci Supabase tidak cocok atau sudah tidak berlaku. Periksa URL dan publishable key pada environment aplikasi.";
   if (/PGRST202|PGRST205|42P01|42883|schema cache|could not find the function|relation .* does not exist/i.test(msg))
     return "Struktur database Supabase belum lengkap. Jalankan ulang migrasi database yang disediakan proyek.";
+  if (/rental_bookings_one_running_per_vehicle_idx/i.test(msg))
+    return "Mobil ini sudah memiliki rental berstatus Berjalan. Selesaikan rental aktifnya terlebih dahulu.";
   if (e?.code === "23505" || /duplicate key/i.test(msg)) return "Nomor sudah digunakan. Gunakan nomor lain.";
   if (/Akses ditolak|permission denied|row-level security/i.test(msg))
     return "Anda tidak memiliki akses untuk tindakan ini.";
   if (/Nomor invoice final/i.test(msg)) return "Nomor invoice final tidak dapat diubah.";
-  if (/Jumlah hari|Harga tidak valid|Minimal satu baris|tidak ditemukan/i.test(msg)) return msg;
+  if (/Keterangan biaya|Biaya tidak valid/i.test(msg)) return msg;
+  if (/Jumlah hari|Harga tidak valid|Minimal satu baris|tidak ditemukan|rental|mobil|tanggal|Nominal|Nama pelanggan|Pilih mobil/i.test(msg)) return msg;
   if (/Failed to fetch|NetworkError/i.test(msg)) return "Koneksi bermasalah. Periksa internet Anda.";
   if (!msg) return "Supabase tidak mengembalikan pesan kesalahan. Periksa koneksi dan konfigurasi aplikasi.";
   return "Terjadi kesalahan. Silakan coba lagi.";
@@ -123,6 +126,54 @@ export async function deleteVehicle(id: string) {
   throwIf(error);
 }
 
+// ---------- Rental bookings ----------
+export type RentalBookingStatus = "Booking" | "Berjalan" | "Selesai" | "Dibatalkan" | "No Show";
+export type RentalPaymentStatus = "Belum Bayar" | "DP" | "Lunas" | "Dibatalkan";
+export type RentalBooking = {
+  id: string;
+  vehicle_id: string | null;
+  car_type: string;
+  plate_number: string;
+  customer_name: string;
+  whatsapp: string | null;
+  start_date: string;
+  end_date: string;
+  service: string;
+  route: string | null;
+  daily_rate: number;
+  deposit: number;
+  paid: number;
+  payment_status: RentalPaymentStatus;
+  booking_status: RentalBookingStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RentalBookingInput = Omit<RentalBooking, "id" | "created_at" | "created_by" | "updated_at"> & {
+  id?: string;
+};
+
+export async function listRentalBookings(): Promise<RentalBooking[]> {
+  const { data, error } = await supabase
+    .from("rental_bookings")
+    .select("*")
+    .order("start_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  throwIf(error);
+  return data ?? [];
+}
+
+export async function saveRentalBooking(booking: RentalBookingInput): Promise<RentalBooking> {
+  const { id, ...values } = booking;
+  const result = id
+    ? await supabase.from("rental_bookings").update(values).eq("id", id).select("*").single()
+    : await supabase.from("rental_bookings").insert(values).select("*").single();
+  throwIf(result.error);
+  if (!result.data) throw new Error("Data rental tidak berhasil disimpan");
+  return result.data;
+}
+
 // ---------- Invoices ----------
 export type InvoiceRow = {
   id: string;
@@ -167,7 +218,7 @@ export async function getInvoiceStats() {
 export async function getInvoice(id: string): Promise<InvoiceInput & { id: string }> {
   const { data, error } = await supabase
     .from("invoices")
-    .select("*, invoice_items(*)")
+    .select("*, invoice_items(*), invoice_additional_charges(*)")
     .eq("id", id)
     .maybeSingle();
   throwIf(error);
@@ -184,6 +235,13 @@ export async function getInvoice(id: string): Promise<InvoiceInput & { id: strin
     client_address: data.client_address ?? "",
     notes: data.notes ?? "",
     status: data.status === "final" ? "final" : "draft",
+    additional_charges: [...(data.invoice_additional_charges ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((charge) => ({
+        ...newAdditionalCharge(),
+        description: charge.description,
+        amount: Number(charge.amount),
+      })),
     items: items.map((it) => ({
       ...newItem(),
       vehicle_id: it.vehicle_id,
@@ -203,7 +261,7 @@ export async function listAllInvoices(): Promise<
 > {
   const { data, error } = await supabase
     .from("invoices")
-    .select("*, invoice_items(*)")
+    .select("*, invoice_items(*), invoice_additional_charges(*)")
     .order("invoice_date", { ascending: false })
     .order("created_at", { ascending: false });
   throwIf(error);
@@ -220,6 +278,13 @@ export async function listAllInvoices(): Promise<
     status: row.status === "final" ? "final" : "draft",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    additional_charges: [...(row.invoice_additional_charges ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((charge) => ({
+        ...newAdditionalCharge(),
+        description: charge.description,
+        amount: Number(charge.amount),
+      })),
     items: [...(row.invoice_items ?? [])]
       .sort((a, b) => a.position - b.position)
       .map((item) => ({
@@ -263,6 +328,10 @@ export async function saveInvoice(inv: InvoiceInput): Promise<string> {
     client_address: inv.client_address.trim(),
     notes: inv.notes.trim(),
     status: inv.status,
+    additional_charges: inv.additional_charges.map((charge) => ({
+      description: charge.description.trim(),
+      amount: charge.amount,
+    })),
     items: inv.items.map((it) => ({
       vehicle_id: it.vehicle_id ?? "",
       car_type: it.car_type.trim(),

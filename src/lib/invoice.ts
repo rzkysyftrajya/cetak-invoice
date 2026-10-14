@@ -27,6 +27,12 @@ export type InvoiceItemInput = {
   price_per_day: number;
 };
 
+export type InvoiceAdditionalChargeInput = {
+  key: string;
+  description: string;
+  amount: number;
+};
+
 export type InvoiceInput = {
   id?: string;
   invoice_number: string;
@@ -39,6 +45,7 @@ export type InvoiceInput = {
   notes: string;
   status: "draft" | "final";
   items: InvoiceItemInput[];
+  additional_charges: InvoiceAdditionalChargeInput[];
 };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
@@ -112,8 +119,16 @@ export function lineTotal(days: number, price: number): number {
   return d * p;
 }
 
-export function grandTotal(items: Pick<InvoiceItemInput, "days" | "price_per_day">[]): number {
-  return items.reduce((sum, it) => sum + lineTotal(it.days, it.price_per_day), 0);
+export function grandTotal(
+  items: Pick<InvoiceItemInput, "days" | "price_per_day">[],
+  additionalCharges: Pick<InvoiceAdditionalChargeInput, "amount">[] = [],
+): number {
+  const rentalTotal = items.reduce((sum, it) => sum + lineTotal(it.days, it.price_per_day), 0);
+  const chargesTotal = additionalCharges.reduce((sum, charge) => {
+    const amount = Number.isFinite(charge.amount) && charge.amount >= 0 ? Math.round(charge.amount) : 0;
+    return sum + amount;
+  }, 0);
+  return rentalTotal + chargesTotal;
 }
 
 export function sanitizeFilenamePart(s: string): string {
@@ -147,6 +162,14 @@ export function newItem(): InvoiceItemInput {
   };
 }
 
+export function newAdditionalCharge(): InvoiceAdditionalChargeInput {
+  return {
+    key: Math.random().toString(36).slice(2),
+    description: "",
+    amount: 0,
+  };
+}
+
 export const itemSchema = z.object({
   car_type: z.string().trim().min(1, "Jenis mobil wajib diisi").max(100),
   plate_number: z.string().trim().max(20),
@@ -155,6 +178,11 @@ export const itemSchema = z.object({
   service_type: z.string().trim().max(60),
   days: z.number().int("Jumlah hari harus bilangan bulat").positive("Jumlah hari harus lebih dari 0").max(365),
   price_per_day: z.number().int().min(0, "Harga tidak boleh negatif").max(1_000_000_000),
+});
+
+export const additionalChargeSchema = z.object({
+  description: z.string().trim().min(1, "Keterangan biaya wajib diisi").max(120),
+  amount: z.number().int().min(0, "Biaya tidak boleh negatif").max(1_000_000_000),
 });
 
 export const invoiceSchema = z.object({
@@ -171,6 +199,7 @@ export const invoiceSchema = z.object({
   notes: z.string().trim().max(500),
   status: z.enum(["draft", "final"]),
   items: z.array(itemSchema).min(1, "Minimal satu baris kendaraan"),
+  additional_charges: z.array(additionalChargeSchema).default([]),
 });
 
 export function emptyInvoice(city = "Jakarta"): InvoiceInput {
@@ -185,6 +214,7 @@ export function emptyInvoice(city = "Jakarta"): InvoiceInput {
     notes: "",
     status: "draft",
     items: [newItem()],
+    additional_charges: [],
   };
 }
 

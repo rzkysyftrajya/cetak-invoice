@@ -158,6 +158,41 @@ export type Database = {
           },
         ]
       }
+      invoice_additional_charges: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string
+          id: string
+          invoice_id: string
+          position: number
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description: string
+          id?: string
+          invoice_id: string
+          position: number
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string
+          id?: string
+          invoice_id?: string
+          position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoice_additional_charges_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoices: {
         Row: {
           city: string
@@ -240,6 +275,80 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      rental_bookings: {
+        Row: {
+          booking_status: "Booking" | "Berjalan" | "Selesai" | "Dibatalkan" | "No Show"
+          car_type: string
+          created_at: string
+          created_by: string | null
+          customer_name: string
+          daily_rate: number
+          deposit: number
+          end_date: string
+          id: string
+          notes: string | null
+          paid: number
+          payment_status: "Belum Bayar" | "DP" | "Lunas" | "Dibatalkan"
+          plate_number: string
+          route: string | null
+          service: string
+          start_date: string
+          updated_at: string
+          vehicle_id: string | null
+          whatsapp: string | null
+        }
+        Insert: {
+          booking_status?: "Booking" | "Berjalan" | "Selesai" | "Dibatalkan" | "No Show"
+          car_type: string
+          created_at?: string
+          created_by?: string | null
+          customer_name: string
+          daily_rate?: number
+          deposit?: number
+          end_date: string
+          id?: string
+          notes?: string | null
+          paid?: number
+          payment_status?: "Belum Bayar" | "DP" | "Lunas" | "Dibatalkan"
+          plate_number: string
+          route?: string | null
+          service?: string
+          start_date: string
+          updated_at?: string
+          vehicle_id?: string | null
+          whatsapp?: string | null
+        }
+        Update: {
+          booking_status?: "Booking" | "Berjalan" | "Selesai" | "Dibatalkan" | "No Show"
+          car_type?: string
+          created_at?: string
+          created_by?: string | null
+          customer_name?: string
+          daily_rate?: number
+          deposit?: number
+          end_date?: string
+          id?: string
+          notes?: string | null
+          paid?: number
+          payment_status?: "Belum Bayar" | "DP" | "Lunas" | "Dibatalkan"
+          plate_number?: string
+          route?: string | null
+          service?: string
+          start_date?: string
+          updated_at?: string
+          vehicle_id?: string | null
+          whatsapp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rental_bookings_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {

@@ -23,6 +23,14 @@ describe("invoice rules", () => {
   it("grand total sums every row", () => {
     expect(grandTotal([{ days: 1, price_per_day: 1350000 }, { days: 2, price_per_day: 500000 }])).toBe(2350000);
   });
+  it("adds one-time service charges without multiplying them by rental days", () => {
+    expect(
+      grandTotal(
+        [{ days: 6, price_per_day: 350000 }],
+        [{ amount: 200000 }, { amount: 50000 }],
+      ),
+    ).toBe(2350000);
+  });
   it("formats Rupiah as Rp1.350.000", () => {
     expect(formatRupiah(1350000)).toBe("Rp1.350.000");
     expect(parseRupiah("Rp1.350.000")).toBe(1350000);

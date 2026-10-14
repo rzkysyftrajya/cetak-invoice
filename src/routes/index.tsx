@@ -2,8 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { pdf, Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 import { Buffer } from "buffer/";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { CarFront, Ellipsis, FilePlus2, Files, LayoutDashboard, Settings, Users } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../integrations/supabase/client";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "../components/ui/sheet";
 import {
   deleteInvoice as deleteCloudInvoice,
   friendlyError,
@@ -11,12 +13,18 @@ import {
   getSettings,
   listAllInvoices,
   listClients,
+  listRentalBookings,
   listVehicles,
   nextInvoiceNumber,
   saveClient,
+  saveRentalBooking,
   saveInvoice as saveCloudInvoice,
   saveVehicle,
   updateSettings,
+  type RentalBooking,
+  type RentalBookingInput,
+  type RentalBookingStatus,
+  type RentalPaymentStatus,
 } from "../lib/api";
 import {
   DEFAULT_LOGO,
@@ -30,9 +38,12 @@ import {
   inclusiveDaysBetween,
   invoiceFilename,
   lineTotal,
+  newAdditionalCharge,
   newItem,
   parseRupiah,
+  todayISO,
   type CompanySettings,
+  type InvoiceAdditionalChargeInput,
   type InvoiceInput,
   type InvoiceItemInput,
 } from "../lib/invoice";
@@ -58,8 +69,47 @@ type VehicleRecord = {
 };
 type InvoiceRecord = InvoiceInput & { id: string; createdAt: string; updatedAt: string };
 
-type NavKey = "dashboard" | "create" | "history" | "clients" | "vehicles" | "settings";
+type NavKey = "dashboard" | "create" | "history" | "clients" | "vehicles" | "rentals" | "settings";
 type UserRole = "admin" | "staff";
+type RentalFormState = {
+  id?: string;
+  vehicle_id: string;
+  car_type: string;
+  plate_number: string;
+  customer_name: string;
+  whatsapp: string;
+  start_date: string;
+  end_date: string;
+  service: string;
+  route: string;
+  daily_rate: string;
+  deposit: string;
+  paid: string;
+  payment_status: RentalPaymentStatus;
+  booking_status: RentalBookingStatus;
+  notes: string;
+};
+
+function emptyRentalForm(): RentalFormState {
+  const today = todayISO();
+  return {
+    vehicle_id: "",
+    car_type: "",
+    plate_number: "",
+    customer_name: "",
+    whatsapp: "",
+    start_date: today,
+    end_date: today,
+    service: "Dengan Sopir",
+    route: "",
+    daily_rate: "0",
+    deposit: "0",
+    paid: "0",
+    payment_status: "Belum Bayar",
+    booking_status: "Berjalan",
+    notes: "",
+  };
+}
 
 const STORAGE_KEYS = {
   invoices: "vrn.invoices",
@@ -137,7 +187,8 @@ function InvoicePDFDocument({
   invoice: InvoiceInput;
   company: CompanySettings;
 }) {
-  const total = grandTotal(invoice.items);
+  const additionalCharges = invoice.additional_charges ?? [];
+  const total = grandTotal(invoice.items, additionalCharges);
   const logo = company.logo_path || DEFAULT_LOGO;
   const signature = company.signature_path || DEFAULT_SIGNATURE;
 
@@ -180,29 +231,58 @@ function InvoicePDFDocument({
             <Text style={[styles.cell, styles.daysCol]}>Hari</Text>
             <Text style={[styles.cell, styles.totalCol]}>Total</Text>
           </View>
-          {Array.from({ length: Math.max(10, invoice.items.length) }, (_, index) => {
-            const item = invoice.items[index];
+          {invoice.items.map((item, index) => {
             return (
-              <View key={item?.key || `empty-${index}`} style={styles.tableRow}>
-                <Text style={[styles.cell, styles.noCol]}>{item ? index + 1 : ""}</Text>
-                <Text style={[styles.cell, styles.carCol]}>{item?.car_type || ""}</Text>
-                <Text style={[styles.cell, styles.plateCol]}>{item?.plate_number || ""}</Text>
+              <View key={item.key || `item-${index}`} style={styles.tableRow}>
+                <Text style={[styles.cell, styles.noCol]}>{index + 1}</Text>
+                <Text style={[styles.cell, styles.carCol]}>{item.car_type || ""}</Text>
+                <Text style={[styles.cell, styles.plateCol]}>{item.plate_number || ""}</Text>
                 <Text style={[styles.cell, styles.dateCol]}>
-                  {item ? formatDateRangeID(item.service_date, item.days, true) : ""}
+                  {formatDateRangeID(item.service_date, item.days, true)}
                 </Text>
-                <Text style={[styles.cell, styles.routeCol]}>{item?.route || ""}</Text>
-                <Text style={[styles.cell, styles.serviceCol]}>{item?.service_type || ""}</Text>
-                <Text style={[styles.cell, styles.daysCol]}>{item?.days || ""}</Text>
+                <Text style={[styles.cell, styles.routeCol]}>{item.route || ""}</Text>
+                <Text style={[styles.cell, styles.serviceCol]}>{item.service_type || ""}</Text>
+                <Text style={[styles.cell, styles.daysCol]}>{item.days || ""}</Text>
                 <Text style={[styles.cell, styles.totalCol]}>
-                  {item ? formatRupiah(lineTotal(item.days, item.price_per_day)) : ""}
+                  {formatRupiah(lineTotal(item.days, item.price_per_day))}
                 </Text>
               </View>
             );
           })}
-          <View style={styles.grandTotalRow}>
-            <Text style={styles.grandTotalSpacer} />
-            <Text style={styles.grandTotalLabel}>Grand Total :</Text>
-            <Text style={styles.grandTotalValue}>{formatRupiah(total)}</Text>
+          {Array.from(
+            { length: Math.max(0, 10 - invoice.items.length) },
+            (_, index) => (
+              <View key={`empty-${index}`} style={styles.tableRow}>
+                <Text style={[styles.cell, styles.noCol]} />
+                <Text style={[styles.cell, styles.carCol]} />
+                <Text style={[styles.cell, styles.plateCol]} />
+                <Text style={[styles.cell, styles.dateCol]} />
+                <Text style={[styles.cell, styles.routeCol]} />
+                <Text style={[styles.cell, styles.serviceCol]} />
+                <Text style={[styles.cell, styles.daysCol]} />
+                <Text style={[styles.cell, styles.totalCol]} />
+              </View>
+            ),
+          )}
+        </View>
+        <View style={styles.invoiceSummary}>
+          {additionalCharges.length > 0 ? (
+            <>
+              <View style={styles.summaryHeadingRow}>
+                <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>Biaya Tambahan</Text>
+                <Text style={[styles.summaryCell, styles.summaryAmountCol]}>Nominal</Text>
+              </View>
+              {additionalCharges.map((charge, index) => (
+                <View key={charge.key || `charge-${index}`} style={styles.summaryRow}>
+                  <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>{charge.description}</Text>
+                  <Text style={[styles.summaryCell, styles.summaryAmountCol]}>{formatRupiah(charge.amount)}</Text>
+                </View>
+              ))}
+            </>
+          ) : null}
+          <View style={styles.summaryTotalRow}>
+            <Text style={[styles.summaryCell, styles.summaryTotalLabel]}>Grand Total :</Text>
+            <Text style={[styles.summaryCell, styles.summaryTotalAmount]}>{formatRupiah(total)}</Text>
           </View>
         </View>
 
@@ -232,7 +312,8 @@ function InvoicePDFDocument({
 }
 
 function InvoicePreview({ invoice, company }: { invoice: InvoiceInput; company: CompanySettings }) {
-  const total = grandTotal(invoice.items);
+  const additionalCharges = invoice.additional_charges ?? [];
+  const total = grandTotal(invoice.items, additionalCharges);
 
   return (
     <div className="invoice-sheet font-invoice">
@@ -305,10 +386,33 @@ function InvoicePreview({ invoice, company }: { invoice: InvoiceInput; company: 
             );
           })}
         </tbody>
+      </table>
+      <table className="invoice-summary-table">
+        <colgroup>
+          <col className="invoice-summary-description-col" />
+          <col className="invoice-summary-amount-col" />
+        </colgroup>
+        {additionalCharges.length > 0 ? (
+          <>
+            <thead>
+              <tr>
+                <th>Biaya Tambahan</th>
+                <th>Nominal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {additionalCharges.map((charge, index) => (
+                <tr key={charge.key || `charge-${index}`}>
+                  <td>{charge.description}</td>
+                  <td>{formatRupiah(charge.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </>
+        ) : null}
         <tfoot>
           <tr>
-            <td colSpan={4} />
-            <th colSpan={3}>Grand Total :</th>
+            <th>Grand Total :</th>
             <th>{formatRupiah(total)}</th>
           </tr>
         </tfoot>
@@ -359,10 +463,12 @@ function Index() {
   const [importPending, setImportPending] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavKey>("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [vehicles, setVehicles] = useState<VehicleRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  const [rentalBookings, setRentalBookings] = useState<RentalBooking[]>([]);
   const [form, setForm] = useState<InvoiceInput>(() => emptyFormState("Jakarta"));
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -370,6 +476,10 @@ function Index() {
   const [endDate, setEndDate] = useState("");
   const [clientForm, setClientForm] = useState({ company: "", pic: "", phone: "", email: "", address: "" });
   const [vehicleForm, setVehicleForm] = useState({ type: "", plateNumber: "", defaultPrice: "" });
+  const [rentalForm, setRentalForm] = useState<RentalFormState>(emptyRentalForm);
+  const [rentalSearch, setRentalSearch] = useState("");
+  const [rentalStatusFilter, setRentalStatusFilter] = useState<"all" | RentalBookingStatus>("Berjalan");
+  const [rentalSaving, setRentalSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [printWhenReady, setPrintWhenReady] = useState(false);
 
@@ -401,6 +511,7 @@ function Index() {
       setClients([]);
       setVehicles([]);
       setInvoices([]);
+      setRentalBookings([]);
       setLocalImportCount(0);
       return;
     }
@@ -416,11 +527,12 @@ function Index() {
         setRoleCheckedFor(session.user.id);
         if (!nextRole) return;
 
-        const [settings, cloudClients, cloudVehicles, cloudInvoices] = await Promise.all([
+        const [settings, cloudClients, cloudVehicles, cloudInvoices, cloudRentals] = await Promise.all([
           getSettings(),
           listClients(),
           listVehicles(),
           listAllInvoices(),
+          listRentalBookings(),
         ]);
         if (!active) return;
         setCompanySettings(settings);
@@ -439,6 +551,7 @@ function Index() {
           defaultPrice: Number(vehicle.default_price ?? 0),
         })));
         setInvoices(cloudInvoices);
+        setRentalBookings(cloudRentals);
         const localInvoices = readStorage<InvoiceRecord[]>(STORAGE_KEYS.invoices, []);
         const cloudNumbers = new Set(cloudInvoices.map((invoice) => invoice.invoice_number));
         setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
@@ -465,8 +578,35 @@ function Index() {
     return () => window.clearTimeout(timeout);
   }, [printWhenReady, showPreview]);
 
-  const totalNominal = useMemo(() => invoices.reduce((sum, invoice) => sum + grandTotal(invoice.items), 0), [invoices]);
+  const totalNominal = useMemo(
+    () => rentalBookings.reduce((sum, booking) => {
+      const isExcluded = booking.booking_status === "Dibatalkan" || booking.booking_status === "No Show";
+      const isIncluded = booking.booking_status === "Berjalan" || booking.payment_status === "Lunas";
+      return isExcluded || !isIncluded
+        ? sum
+        : sum + inclusiveDaysBetween(booking.start_date, booking.end_date) * booking.daily_rate;
+    }, 0),
+    [rentalBookings],
+  );
   const recentInvoices = useMemo(() => [...invoices].sort((a, b) => b.invoice_date.localeCompare(a.invoice_date)).slice(0, 5), [invoices]);
+  const runningRentalCount = useMemo(
+    () => rentalBookings.filter((booking) => booking.booking_status === "Berjalan").length,
+    [rentalBookings],
+  );
+  const filteredRentalBookings = useMemo(() => {
+    const term = rentalSearch.trim().toLowerCase();
+    return rentalBookings.filter((booking) => {
+      const matchesStatus = rentalStatusFilter === "all" || booking.booking_status === rentalStatusFilter;
+      const matchesSearch = !term || [
+        booking.car_type,
+        booking.plate_number,
+        booking.customer_name,
+        booking.whatsapp ?? "",
+        booking.route ?? "",
+      ].some((value) => value.toLowerCase().includes(term));
+      return matchesStatus && matchesSearch;
+    });
+  }, [rentalBookings, rentalSearch, rentalStatusFilter]);
   const thisMonthCount = useMemo(() => {
     const monthNow = new Date().getMonth();
     const yearNow = new Date().getFullYear();
@@ -482,8 +622,18 @@ function Index() {
     { key: "history", label: "Riwayat Invoice" },
     { key: "clients", label: "Data Klien" },
     { key: "vehicles", label: "Data Kendaraan" },
+    { key: "rentals", label: "Rental Berjalan" },
     { key: "settings", label: "Pengaturan Perusahaan" },
   ] as const;
+  const mobilePrimaryItems = [
+    { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { key: "create", label: "Buat Invoice", icon: FilePlus2 },
+    { key: "history", label: "Riwayat", icon: Files },
+    { key: "rentals", label: "Rental", icon: CarFront },
+  ] as const;
+  const mobileMoreItems = menuItems.filter(
+    (item) => !mobilePrimaryItems.some((primaryItem) => primaryItem.key === item.key),
+  );
 
   const filteredInvoices = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -513,6 +663,40 @@ function Index() {
         if (field === "price_per_day") nextItem.price_per_day = Number(value) || 0;
         return nextItem;
       }),
+    }));
+  }
+
+  function updateAdditionalCharge(
+    index: number,
+    field: keyof InvoiceAdditionalChargeInput,
+    value: string | number,
+  ) {
+    setForm((current) => ({
+      ...current,
+      additional_charges: (current.additional_charges ?? []).map((charge, chargeIndex) => {
+        if (chargeIndex !== index) return charge;
+        return {
+          ...charge,
+          [field]: field === "amount" ? Number(value) || 0 : value,
+        };
+      }),
+    }));
+  }
+
+  function addAdditionalCharge() {
+    setForm((current) => ({
+      ...current,
+      additional_charges: [
+        ...(current.additional_charges ?? []),
+        { ...newAdditionalCharge(), key: makeId("charge") },
+      ],
+    }));
+  }
+
+  function removeAdditionalCharge(index: number) {
+    setForm((current) => ({
+      ...current,
+      additional_charges: (current.additional_charges ?? []).filter((_, chargeIndex) => chargeIndex !== index),
     }));
   }
 
@@ -587,6 +771,7 @@ function Index() {
       id: invoice.id,
       invoice_number: invoice.invoice_number,
       client_id: invoice.client_id ?? null,
+      additional_charges: invoice.additional_charges ?? [],
     });
     setSelectedInvoiceId(invoice.id);
     setShowPreview(false);
@@ -601,6 +786,10 @@ function Index() {
         invoice_number: await nextInvoiceNumber(),
         status: "draft",
         items: invoice.items.map((item) => ({ ...item, key: makeId("item") })),
+        additional_charges: (invoice.additional_charges ?? []).map((charge) => ({
+          ...charge,
+          key: makeId("charge"),
+        })),
       };
       setForm(duplicate);
       setSelectedInvoiceId(null);
@@ -623,6 +812,12 @@ function Index() {
     }
     if (form.items.some((item) => !item.car_type.trim() || !item.service_date || item.days <= 0 || item.days > 365 || item.price_per_day < 0)) {
       window.alert("Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, rentang tanggal, hari, dan harga per hari.");
+      return;
+    }
+    if ((form.additional_charges ?? []).some((charge) =>
+      !charge.description.trim() || !Number.isInteger(charge.amount) || charge.amount < 0 || charge.amount > 1_000_000_000
+    )) {
+      window.alert("Terdapat biaya tambahan yang belum valid. Isi keterangan dan pastikan nominalnya tidak negatif.");
       return;
     }
 
@@ -737,6 +932,108 @@ function Index() {
     }
   }
 
+  function updateRentalVehicle(vehicleId: string) {
+    const vehicle = vehicles.find((item) => item.id === vehicleId);
+    setRentalForm((current) => ({
+      ...current,
+      vehicle_id: vehicleId,
+      car_type: vehicle?.type ?? "",
+      plate_number: vehicle?.plateNumber ?? "",
+      daily_rate: vehicle ? String(vehicle.defaultPrice) : current.daily_rate,
+    }));
+  }
+
+  function editRentalBooking(booking: RentalBooking) {
+    setRentalForm({
+      id: booking.id,
+      vehicle_id: booking.vehicle_id ?? "",
+      car_type: booking.car_type,
+      plate_number: booking.plate_number,
+      customer_name: booking.customer_name,
+      whatsapp: booking.whatsapp ?? "",
+      start_date: booking.start_date,
+      end_date: booking.end_date,
+      service: booking.service,
+      route: booking.route ?? "",
+      daily_rate: String(booking.daily_rate),
+      deposit: String(booking.deposit),
+      paid: String(booking.paid),
+      payment_status: booking.payment_status,
+      booking_status: booking.booking_status,
+      notes: booking.notes ?? "",
+    });
+    setActiveTab("rentals");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function submitRentalBooking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const vehicle = vehicles.find((item) => item.id === rentalForm.vehicle_id);
+    const days = inclusiveDaysBetween(rentalForm.start_date, rentalForm.end_date);
+    const dailyRate = Number(rentalForm.daily_rate || 0);
+    const deposit = Number(rentalForm.deposit || 0);
+    const paid = Number(rentalForm.paid || 0);
+
+    if (!vehicle) {
+      window.alert("Pilih kendaraan dari Data Kendaraan terlebih dahulu.");
+      return;
+    }
+    if (!rentalForm.customer_name.trim()) {
+      window.alert("Nama pelanggan wajib diisi.");
+      return;
+    }
+    if (!days) {
+      window.alert("Tanggal selesai harus sama dengan atau setelah tanggal mulai.");
+      return;
+    }
+    if ([dailyRate, deposit, paid].some((amount) =>
+      !Number.isSafeInteger(amount) || amount < 0 || amount > 10_000_000_000
+    )) {
+      window.alert("Nominal harga, deposit, dan pembayaran harus berupa angka bulat yang wajar.");
+      return;
+    }
+
+    const payload: RentalBookingInput = {
+      ...(rentalForm.id ? { id: rentalForm.id } : {}),
+      vehicle_id: vehicle.id,
+      car_type: vehicle.type,
+      plate_number: vehicle.plateNumber,
+      customer_name: rentalForm.customer_name.trim(),
+      whatsapp: rentalForm.whatsapp.trim() || null,
+      start_date: rentalForm.start_date,
+      end_date: rentalForm.end_date,
+      service: rentalForm.service,
+      route: rentalForm.route.trim() || null,
+      daily_rate: dailyRate,
+      deposit,
+      paid,
+      payment_status: rentalForm.payment_status,
+      booking_status: rentalForm.booking_status,
+      notes: rentalForm.notes.trim() || null,
+    };
+
+    setRentalSaving(true);
+    try {
+      const saved = await saveRentalBooking(payload);
+      setRentalBookings((current) =>
+        [saved, ...current.filter((booking) => booking.id !== saved.id)]
+          .sort((a, b) => b.start_date.localeCompare(a.start_date) || b.created_at.localeCompare(a.created_at)),
+      );
+      setRentalStatusFilter("all");
+      setRentalSearch("");
+      setRentalForm(emptyRentalForm());
+      window.alert("Data rental berhasil disimpan.");
+    } catch (error) {
+      window.alert(friendlyError(error));
+    } finally {
+      setRentalSaving(false);
+    }
+  }
+
+  function cancelRentalEdit() {
+    setRentalForm(emptyRentalForm());
+  }
+
   async function saveCompanySettings() {
     setSettingsSaving(true);
     try {
@@ -792,6 +1089,7 @@ function Index() {
           ...invoiceData,
           client_id: null,
           items: invoice.items.map((item) => ({ ...item, vehicle_id: null })),
+          additional_charges: invoice.additional_charges ?? [],
         });
         const timestamp = new Date().toISOString();
         importedInvoices.push({ ...invoice, id, client_id: null, createdAt: timestamp, updatedAt: timestamp });
@@ -929,12 +1227,12 @@ function Index() {
 
   return (
     <div className="min-h-screen bg-[var(--color-background)] text-[var(--color-foreground)]">
-      <div className="mx-auto flex max-w-[1600px] gap-6 p-5 lg:p-8">
+      <div className="mx-auto flex max-w-[1600px] gap-6 p-5 pb-28 lg:p-8">
         <aside className="hidden w-72 shrink-0 rounded-[28px] bg-slate-950 p-5 text-white lg:block">
           <div className="mb-8 flex items-center gap-3">
             <img src={companySettings.logo_path || DEFAULT_LOGO} alt="logo" className="h-12 w-12 rounded-xl object-contain" />
             <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-300">Invoice</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-300">Manajemen Rental</div>
               <div className="text-lg font-bold">VRN</div>
             </div>
           </div>
@@ -969,6 +1267,13 @@ function Index() {
               </button>
               <button
                 type="button"
+                onClick={() => { cancelRentalEdit(); setActiveTab("rentals"); }}
+                className="rounded-xl border border-border px-4 py-3 text-sm font-semibold text-foreground"
+              >
+                + Catat Rental
+              </button>
+              <button
+                type="button"
                 onClick={signOut}
                 className="rounded-xl border border-border px-4 py-3 text-sm font-medium text-foreground"
               >
@@ -976,6 +1281,77 @@ function Index() {
               </button>
             </div>
           </div>
+
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <nav
+              aria-label="Navigasi utama"
+              className="fixed inset-x-0 bottom-0 z-50 flex border-t border-border bg-white/95 px-1 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(15,23,42,0.12)] backdrop-blur lg:hidden"
+            >
+              {mobilePrimaryItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setActiveTab(item.key)}
+                    aria-current={activeTab === item.key ? "page" : undefined}
+                    className={`flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold leading-tight ${
+                      activeTab === item.key ? "text-slate-950" : "text-muted-foreground"
+                    }`}
+                  >
+                    <Icon aria-hidden="true" className="h-5 w-5" />
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+              <SheetTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Buka menu lainnya"
+                  aria-current={mobileMoreItems.some((item) => item.key === activeTab) ? "page" : undefined}
+                  className={`flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold leading-tight ${
+                    mobileMoreItems.some((item) => item.key === activeTab) ? "text-slate-950" : "text-muted-foreground"
+                  }`}
+                >
+                  <Ellipsis aria-hidden="true" className="h-5 w-5" />
+                  <span>Lainnya</span>
+                </button>
+              </SheetTrigger>
+            </nav>
+            <SheetContent
+              side="bottom"
+              className="max-h-[70vh] overflow-y-auto rounded-t-3xl px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-6 lg:hidden"
+            >
+              <SheetHeader className="mb-5 text-left">
+                <SheetTitle>Navigasi</SheetTitle>
+                <SheetDescription>Pilih halaman yang ingin dibuka.</SheetDescription>
+              </SheetHeader>
+              <div className="grid grid-cols-2 gap-3">
+                {mobileMoreItems.map((item) => {
+                  const Icon = item.key === "clients" ? Users : item.key === "vehicles" ? CarFront : Settings;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(item.key);
+                        setMobileNavOpen(false);
+                      }}
+                      aria-current={activeTab === item.key ? "page" : undefined}
+                      className={`flex min-h-16 items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-semibold ${
+                        activeTab === item.key
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-border bg-white text-foreground"
+                      }`}
+                    >
+                      <Icon aria-hidden="true" className="h-5 w-5 shrink-0" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </SheetContent>
+          </Sheet>
 
           {localImportCount > 0 && (
             <section className="flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm md:flex-row md:items-center md:justify-between">
@@ -1004,7 +1380,7 @@ function Index() {
                   <div className="mt-2 text-4xl font-bold text-foreground">{invoices.length}</div>
                 </div>
                 <div className="rounded-[24px] border border-border bg-white p-5 shadow-card">
-                  <div className="text-sm text-muted-foreground">Total Nominal</div>
+                  <div className="text-sm text-muted-foreground">Total Nominal Rental</div>
                   <div className="mt-2 text-3xl font-bold text-foreground">{formatRupiah(totalNominal)}</div>
                 </div>
                 <div className="rounded-[24px] border border-border bg-white p-5 shadow-card">
@@ -1016,6 +1392,15 @@ function Index() {
                   <div className="mt-2 text-xl font-bold text-foreground">{recentInvoices[0]?.invoice_number || "-"}</div>
                   <div className="text-sm text-muted-foreground">{recentInvoices[0] ? formatDateID(recentInvoices[0].invoice_date, true) : "Belum ada"}</div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("rentals")}
+                  className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-5 text-left shadow-card"
+                >
+                  <div className="text-sm text-emerald-800">Mobil Sedang Berjalan</div>
+                  <div className="mt-2 text-4xl font-bold text-emerald-950">{runningRentalCount}</div>
+                  <div className="text-sm text-emerald-800">Lihat data rental aktif</div>
+                </button>
               </section>
 
               <section className="rounded-[28px] border border-border bg-white p-5 shadow-card">
@@ -1035,7 +1420,7 @@ function Index() {
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <div className="font-semibold text-foreground">{formatRupiah(grandTotal(invoice.items))}</div>
+                            <div className="font-semibold text-foreground">{formatRupiah(grandTotal(invoice.items, invoice.additional_charges ?? []))}</div>
                           </div>
                           <button type="button" onClick={() => loadEditInvoice(invoice)} className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground">Edit</button>
                         </div>
@@ -1045,6 +1430,187 @@ function Index() {
                 </div>
               </section>
             </>
+          )}
+
+          {activeTab === "rentals" && (
+            <section className="space-y-6">
+              <div>
+                <h2 className="text-2xl font-bold text-foreground">Data Mobil Berjalan</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Catat rental dan pantau status kendaraan, pelanggan, jadwal, serta pembayaran.
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                {([
+                  ["Berjalan", "Sedang Disewa", "text-emerald-700"],
+                  ["Booking", "Booking", "text-amber-700"],
+                  ["Selesai", "Selesai", "text-slate-700"],
+                ] as const).map(([status, label, color]) => (
+                  <div key={status} className="rounded-[24px] border border-border bg-white p-5 shadow-card">
+                    <div className="text-sm text-muted-foreground">{label}</div>
+                    <div className={`mt-2 text-3xl font-bold ${color}`}>
+                      {rentalBookings.filter((booking) => booking.booking_status === status).length}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <form onSubmit={submitRentalBooking} className="space-y-5 rounded-[28px] border border-border bg-white p-5 shadow-card">
+                <div>
+                  <h3 className="text-xl font-bold text-foreground">
+                    {rentalForm.id ? "Edit Data Rental" : "Catat Rental Berjalan"}
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Total tagihan dihitung dari jumlah hari kalender dikali harga per hari.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Kendaraan *</span>
+                    <select
+                      required
+                      value={rentalForm.vehicle_id}
+                      onChange={(event) => updateRentalVehicle(event.target.value)}
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    >
+                      <option value="">Pilih kendaraan</option>
+                      {vehicles.map((vehicle) => (
+                        <option key={vehicle.id} value={vehicle.id}>{vehicle.type} · {vehicle.plateNumber}</option>
+                      ))}
+                    </select>
+                    {vehicles.length === 0 && (
+                      <span className="block text-xs text-amber-700">Tambahkan kendaraan melalui menu Data Kendaraan terlebih dahulu.</span>
+                    )}
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Nama pelanggan *</span>
+                    <input required value={rentalForm.customer_name} onChange={(event) => setRentalForm((current) => ({ ...current, customer_name: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">No. WhatsApp</span>
+                    <input inputMode="tel" value={rentalForm.whatsapp} onChange={(event) => setRentalForm((current) => ({ ...current, whatsapp: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Tanggal mulai *</span>
+                    <input required type="date" value={rentalForm.start_date} onChange={(event) => setRentalForm((current) => ({ ...current, start_date: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Tanggal selesai *</span>
+                    <input required type="date" min={rentalForm.start_date || undefined} value={rentalForm.end_date} onChange={(event) => setRentalForm((current) => ({ ...current, end_date: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Layanan</span>
+                    <select value={rentalForm.service} onChange={(event) => setRentalForm((current) => ({ ...current, service: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5">
+                      <option>Dengan Sopir</option>
+                      <option>Lepas Kunci</option>
+                      <option>Rent To Rent (LK)</option>
+                      <option>Rent To Rent (All In)</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Tujuan / rute</span>
+                    <input value={rentalForm.route} onChange={(event) => setRentalForm((current) => ({ ...current, route: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Harga per hari (Rp)</span>
+                    <input type="number" min={0} step={1} value={rentalForm.daily_rate} onChange={(event) => setRentalForm((current) => ({ ...current, daily_rate: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Deposit (Rp)</span>
+                    <input type="number" min={0} step={1} value={rentalForm.deposit} onChange={(event) => setRentalForm((current) => ({ ...current, deposit: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Sudah dibayar (Rp)</span>
+                    <input type="number" min={0} step={1} value={rentalForm.paid} onChange={(event) => setRentalForm((current) => ({ ...current, paid: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Status pembayaran</span>
+                    <select value={rentalForm.payment_status} onChange={(event) => setRentalForm((current) => ({ ...current, payment_status: event.target.value as RentalPaymentStatus }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5">
+                      <option>Belum Bayar</option><option>DP</option><option>Lunas</option><option>Dibatalkan</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Status rental</span>
+                    <select value={rentalForm.booking_status} onChange={(event) => setRentalForm((current) => ({ ...current, booking_status: event.target.value as RentalBookingStatus }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5">
+                      <option>Booking</option><option>Berjalan</option><option>Selesai</option><option>Dibatalkan</option><option>No Show</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2 text-sm md:col-span-2 xl:col-span-3">
+                    <span className="font-medium text-foreground">Catatan</span>
+                    <textarea value={rentalForm.notes} onChange={(event) => setRentalForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <button type="submit" disabled={rentalSaving || vehicles.length === 0} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                    {rentalSaving ? "Menyimpan..." : rentalForm.id ? "Simpan Perubahan" : "Simpan Rental"}
+                  </button>
+                  {rentalForm.id && (
+                    <button type="button" onClick={cancelRentalEdit} className="rounded-xl border border-border px-5 py-3 text-sm font-semibold text-foreground">
+                      Batal Edit
+                    </button>
+                  )}
+                </div>
+              </form>
+
+              <div className="rounded-[28px] border border-border bg-white p-5 shadow-card">
+                <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold text-foreground">Daftar Rental</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">Pilih status Berjalan untuk melihat kendaraan yang sedang digunakan.</p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <input value={rentalSearch} onChange={(event) => setRentalSearch(event.target.value)} placeholder="Cari mobil / pelanggan" aria-label="Cari data rental" className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm" />
+                    <select value={rentalStatusFilter} onChange={(event) => setRentalStatusFilter(event.target.value as "all" | RentalBookingStatus)} aria-label="Filter status rental" className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm">
+                      <option value="Berjalan">Sedang Berjalan</option>
+                      <option value="Booking">Booking</option>
+                      <option value="Selesai">Selesai</option>
+                      <option value="Dibatalkan">Dibatalkan</option>
+                      <option value="No Show">No Show</option>
+                      <option value="all">Semua Status</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-muted-foreground">
+                        <th className="p-3 font-semibold">Mobil</th>
+                        <th className="p-3 font-semibold">Pelanggan</th>
+                        <th className="p-3 font-semibold">Jadwal</th>
+                        <th className="p-3 font-semibold">Layanan / Rute</th>
+                        <th className="p-3 text-right font-semibold">Total / Dibayar</th>
+                        <th className="p-3 font-semibold">Status</th>
+                        <th className="p-3 font-semibold">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRentalBookings.map((booking) => {
+                        const days = inclusiveDaysBetween(booking.start_date, booking.end_date);
+                        const total = days * booking.daily_rate;
+                        const remaining = Math.max(0, total - booking.paid);
+                        return (
+                          <tr key={booking.id} className="border-b border-border last:border-0">
+                            <td className="p-3"><div className="font-semibold text-foreground">{booking.car_type}</div><div className="text-xs text-muted-foreground">{booking.plate_number}</div></td>
+                            <td className="p-3"><div className="font-medium text-foreground">{booking.customer_name}</div><div className="text-xs text-muted-foreground">{booking.whatsapp || "Tanpa nomor WhatsApp"}</div></td>
+                            <td className="p-3"><div>{formatDateRangeID(booking.start_date, days, true)}</div><div className="text-xs text-muted-foreground">{days} hari</div></td>
+                            <td className="p-3"><div>{booking.service}</div><div className="text-xs text-muted-foreground">{booking.route || "Rute belum diisi"}</div></td>
+                            <td className="p-3 text-right"><div className="font-medium">{formatRupiah(total)}</div><div className="text-xs text-muted-foreground">Dibayar {formatRupiah(booking.paid)} · Sisa {formatRupiah(remaining)}</div></td>
+                            <td className="p-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${booking.booking_status === "Berjalan" ? "bg-emerald-100 text-emerald-800" : booking.booking_status === "Booking" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>{booking.booking_status}</span><div className="mt-1 text-xs text-muted-foreground">{booking.payment_status}</div></td>
+                            <td className="p-3"><button type="button" onClick={() => editRentalBooking(booking)} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground">Edit</button></td>
+                          </tr>
+                        );
+                      })}
+                      {filteredRentalBookings.length === 0 && (
+                        <tr><td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">Belum ada data rental untuk filter ini.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
           )}
 
           {activeTab === "create" && (
@@ -1191,10 +1757,65 @@ function Index() {
                   ))}
                 </div>
 
+                <div className="mt-8 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-bold text-foreground">Biaya Tambahan Layanan / Operasional</h3>
+                      <p className="text-sm text-muted-foreground">Biaya sekali bayar, tidak dikalikan jumlah hari rental.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addAdditionalCharge}
+                      className="shrink-0 rounded-xl border border-border bg-muted px-3 py-2 text-sm font-semibold text-foreground"
+                    >
+                      + Tambah biaya
+                    </button>
+                  </div>
+
+                  {(form.additional_charges ?? []).map((charge, index) => (
+                    <div key={charge.key || index} className="rounded-[24px] border border-border bg-muted p-4">
+                      <div className="mb-4 flex items-center justify-between">
+                        <div className="text-sm font-semibold text-foreground">Biaya {index + 1}</div>
+                        <button
+                          type="button"
+                          onClick={() => removeAdditionalCharge(index)}
+                          className="text-sm font-medium text-destructive"
+                        >
+                          Hapus
+                        </button>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="space-y-2 text-sm">
+                          <span className="font-medium text-foreground">Keterangan biaya</span>
+                          <input
+                            value={charge.description}
+                            onChange={(event) => updateAdditionalCharge(index, "description", event.target.value)}
+                            placeholder="Contoh: Biaya antar-jemput bandara"
+                            maxLength={120}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
+                        </label>
+                        <label className="space-y-2 text-sm">
+                          <span className="font-medium text-foreground">Nominal (sekali bayar)</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={1_000_000_000}
+                            step={1}
+                            value={charge.amount}
+                            onChange={(event) => updateAdditionalCharge(index, "amount", event.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
                 <div className="mt-6 rounded-[24px] border border-border bg-amber-50 p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">Grand Total</div>
-                    <div className="text-2xl font-bold text-foreground">{formatRupiah(grandTotal(form.items))}</div>
+                    <div className="text-2xl font-bold text-foreground">{formatRupiah(grandTotal(form.items, form.additional_charges ?? []))}</div>
                   </div>
                 </div>
 
@@ -1237,7 +1858,7 @@ function Index() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className="font-semibold text-foreground">{formatRupiah(grandTotal(invoice.items))}</div>
+                          <div className="font-semibold text-foreground">{formatRupiah(grandTotal(invoice.items, invoice.additional_charges ?? []))}</div>
                         </div>
                         <button type="button" onClick={() => loadEditInvoice(invoice)} className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground">Edit</button>
                         <button type="button" onClick={() => duplicateInvoice(invoice)} className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground">Duplikat</button>
@@ -1466,33 +2087,41 @@ const styles = StyleSheet.create({
   serviceCol: { width: "16%" },
   daysCol: { width: "8%" },
   totalCol: { width: "12%" },
-  grandTotalRow: {
+  invoiceSummary: {
+    width: "60%",
+    alignSelf: "flex-end",
+    marginTop: 8,
+  },
+  summaryHeadingRow: {
     flexDirection: "row",
-    height: 30,
   },
-  grandTotalSpacer: {
-    width: "45%",
+  summaryRow: {
+    flexDirection: "row",
+  },
+  summaryCell: {
+    fontSize: 10,
+    paddingVertical: 4,
+    paddingHorizontal: 5,
     borderWidth: 0.4,
     borderColor: "#222222",
   },
-  grandTotalLabel: {
-    width: "43%",
-    fontSize: 11,
-    fontWeight: "bold",
-    paddingVertical: 8,
-    paddingHorizontal: 2,
-    borderWidth: 0.4,
-    borderColor: "#222222",
+  summaryDescriptionCol: {
+    width: "70%",
+    textAlign: "left",
   },
-  grandTotalValue: {
-    width: "12%",
-    fontSize: 11,
-    fontWeight: "bold",
+  summaryAmountCol: {
+    width: "30%",
     textAlign: "right",
-    paddingVertical: 8,
-    paddingHorizontal: 2,
-    borderWidth: 0.4,
-    borderColor: "#222222",
+  },
+  summaryTotalRow: {
+    flexDirection: "row",
+    marginTop: 4,
+  },
+  summaryTotalLabel: {
+    fontWeight: "bold",
+  },
+  summaryTotalAmount: {
+    fontWeight: "bold",
   },
   footerRow: {
     flexDirection: "row",

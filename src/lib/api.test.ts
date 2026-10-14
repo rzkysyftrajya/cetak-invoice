@@ -14,4 +14,11 @@ describe("Supabase error messages", () => {
     expect(friendlyError({ message: "Could not find the function public.next_invoice_number", code: "PGRST202" }))
       .toContain("migrasi database");
   });
+
+  it("explains when a vehicle already has a running rental", () => {
+    expect(friendlyError({
+      message: 'duplicate key value violates unique constraint "rental_bookings_one_running_per_vehicle_idx"',
+      code: "23505",
+    })).toContain("sudah memiliki rental berstatus Berjalan");
+  });
 });

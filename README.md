@@ -318,7 +318,7 @@ This project was built with [Lovable](https://lovable.dev).
 ## Menghubungkan aplikasi ke Supabase
 
 1. Pastikan variabel `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_URL`, dan `SUPABASE_PUBLISHABLE_KEY` sudah diatur pada environment proyek. Jangan bagikan atau commit file `.env`.
-2. Jalankan migrasi `drizzle/migrations/0000_migration.sql` dan `drizzle/migrations/0001_migration.sql` pada proyek Supabase yang sama.
+2. Jalankan migrasi `drizzle/migrations/0000_migration.sql`, `drizzle/migrations/0001_migration.sql`, dan `drizzle/migrations/0002_invoice_additional_charges.sql` secara berurutan pada proyek Supabase yang sama.
 3. Buka aplikasi dan pilih **Daftar sebagai admin pertama** untuk akun admin awal. Jika autentikasi Supabase mewajibkan verifikasi email, verifikasi email lalu masuk.
 4. Di perangkat lain, buka alamat aplikasi yang sudah di-deploy dan masuk menggunakan akun yang sama. Invoice, klien, kendaraan, dan pengaturan perusahaan yang disimpan dari aplikasi akan dibaca dari Supabase.
 5. Invoice lama yang hanya tersimpan di browser tidak otomatis berpindah. Pada browser asal, masuk ke aplikasi dan pilih **Impor invoice lokal**. Data browser lama tidak dihapus; nomor invoice yang sudah ada di Supabase tidak dibuat ulang.
@@ -342,11 +342,11 @@ Continue developing this project in the [Lovable editor](https://lovable.dev/pro
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Prefer working locally? You need [Bun](https://bun.sh/docs/installation).
 
 ```sh
 git clone <this-repository-url>
 cd <repository-name>
-npm i
-npm run dev
+bun install --frozen-lockfile
+bun run dev
 ```
