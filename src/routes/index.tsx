@@ -2,10 +2,27 @@ import { createFileRoute } from "@tanstack/react-router";
 import { pdf, Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
 import { Buffer } from "buffer/";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CarFront, Ellipsis, FilePlus2, Files, LayoutDashboard, Settings, Users } from "lucide-react";
+import {
+  CarFront,
+  Ellipsis,
+  FilePlus2,
+  Files,
+  LayoutDashboard,
+  Settings,
+  Users,
+} from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../integrations/supabase/client";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "../components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "../components/ui/sheet";
+import { FleetManagement } from "../components/fleet-management";
+import { isMedanCity, rentalTotal } from "../lib/fleet";
 import {
   deleteInvoice as deleteCloudInvoice,
   friendlyError,
@@ -34,6 +51,7 @@ import {
   formatDateID,
   formatDateRangeID,
   formatRupiah,
+  formatRupiahInput,
   grandTotal,
   inclusiveDaysBetween,
   invoiceFilename,
@@ -69,11 +87,23 @@ type VehicleRecord = {
 };
 type InvoiceRecord = InvoiceInput & { id: string; createdAt: string; updatedAt: string };
 
-type NavKey = "dashboard" | "create" | "history" | "clients" | "vehicles" | "rentals" | "settings";
+type NavKey =
+  | "dashboard"
+  | "invoiceDashboard"
+  | "create"
+  | "history"
+  | "clients"
+  | "vehicles"
+  | "rentals"
+  | "unitIncome"
+  | "settings"
+  | "legacyRentals"
+  | "legacyVehicles";
 type UserRole = "admin" | "staff";
 type RentalFormState = {
   id?: string;
   vehicle_id: string;
+  city: string;
   car_type: string;
   plate_number: string;
   customer_name: string;
@@ -82,6 +112,7 @@ type RentalFormState = {
   end_date: string;
   service: string;
   route: string;
+  normal_rate: string;
   daily_rate: string;
   deposit: string;
   paid: string;
@@ -94,6 +125,7 @@ function emptyRentalForm(): RentalFormState {
   const today = todayISO();
   return {
     vehicle_id: "",
+    city: "",
     car_type: "",
     plate_number: "",
     customer_name: "",
@@ -102,6 +134,7 @@ function emptyRentalForm(): RentalFormState {
     end_date: today,
     service: "Dengan Sopir",
     route: "",
+    normal_rate: "",
     daily_rate: "0",
     deposit: "0",
     paid: "0",
@@ -120,7 +153,8 @@ const STORAGE_KEYS = {
 
 const defaultCompanySettings: CompanySettings = {
   company_name: "PT VICKY RENTAL NUSANTARA",
-  address: "Jl. Sempurna Gg. Mawar No.12, Dusun II, Sambirejo Timur, Kec. Medan Tembung, Kabupaten Deli Serdang, Sumatera Utara 20371.",
+  address:
+    "Jl. Sempurna Gg. Mawar No.12, Dusun II, Sambirejo Timur, Kec. Medan Tembung, Kabupaten Deli Serdang, Sumatera Utara 20371.",
   phone: "082363389893",
   email: "vickeycky@gmail.com",
   bank_accounts: [
@@ -249,40 +283,45 @@ function InvoicePDFDocument({
               </View>
             );
           })}
-          {Array.from(
-            { length: Math.max(0, 10 - invoice.items.length) },
-            (_, index) => (
-              <View key={`empty-${index}`} style={styles.tableRow}>
-                <Text style={[styles.cell, styles.noCol]} />
-                <Text style={[styles.cell, styles.carCol]} />
-                <Text style={[styles.cell, styles.plateCol]} />
-                <Text style={[styles.cell, styles.dateCol]} />
-                <Text style={[styles.cell, styles.routeCol]} />
-                <Text style={[styles.cell, styles.serviceCol]} />
-                <Text style={[styles.cell, styles.daysCol]} />
-                <Text style={[styles.cell, styles.totalCol]} />
-              </View>
-            ),
-          )}
+          {Array.from({ length: Math.max(0, 10 - invoice.items.length) }, (_, index) => (
+            <View key={`empty-${index}`} style={styles.tableRow}>
+              <Text style={[styles.cell, styles.noCol]} />
+              <Text style={[styles.cell, styles.carCol]} />
+              <Text style={[styles.cell, styles.plateCol]} />
+              <Text style={[styles.cell, styles.dateCol]} />
+              <Text style={[styles.cell, styles.routeCol]} />
+              <Text style={[styles.cell, styles.serviceCol]} />
+              <Text style={[styles.cell, styles.daysCol]} />
+              <Text style={[styles.cell, styles.totalCol]} />
+            </View>
+          ))}
         </View>
         <View style={styles.invoiceSummary}>
           {additionalCharges.length > 0 ? (
             <>
               <View style={styles.summaryHeadingRow}>
-                <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>Biaya Tambahan</Text>
+                <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>
+                  Biaya Tambahan
+                </Text>
                 <Text style={[styles.summaryCell, styles.summaryAmountCol]}>Nominal</Text>
               </View>
               {additionalCharges.map((charge, index) => (
                 <View key={charge.key || `charge-${index}`} style={styles.summaryRow}>
-                  <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>{charge.description}</Text>
-                  <Text style={[styles.summaryCell, styles.summaryAmountCol]}>{formatRupiah(charge.amount)}</Text>
+                  <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>
+                    {charge.description}
+                  </Text>
+                  <Text style={[styles.summaryCell, styles.summaryAmountCol]}>
+                    {formatRupiah(charge.amount)}
+                  </Text>
                 </View>
               ))}
             </>
           ) : null}
           <View style={styles.summaryTotalRow}>
             <Text style={[styles.summaryCell, styles.summaryTotalLabel]}>Grand Total :</Text>
-            <Text style={[styles.summaryCell, styles.summaryTotalAmount]}>{formatRupiah(total)}</Text>
+            <Text style={[styles.summaryCell, styles.summaryTotalAmount]}>
+              {formatRupiah(total)}
+            </Text>
           </View>
         </View>
 
@@ -464,6 +503,7 @@ function Index() {
   const [reloadKey, setReloadKey] = useState(0);
   const [activeTab, setActiveTab] = useState<NavKey>("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [newRentalRequest, setNewRentalRequest] = useState(0);
   const [companySettings, setCompanySettings] = useState<CompanySettings>(defaultCompanySettings);
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [vehicles, setVehicles] = useState<VehicleRecord[]>([]);
@@ -474,28 +514,41 @@ function Index() {
   const [query, setQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [clientForm, setClientForm] = useState({ company: "", pic: "", phone: "", email: "", address: "" });
+  const [clientForm, setClientForm] = useState({
+    company: "",
+    pic: "",
+    phone: "",
+    email: "",
+    address: "",
+  });
   const [vehicleForm, setVehicleForm] = useState({ type: "", plateNumber: "", defaultPrice: "" });
   const [rentalForm, setRentalForm] = useState<RentalFormState>(emptyRentalForm);
   const [rentalSearch, setRentalSearch] = useState("");
-  const [rentalStatusFilter, setRentalStatusFilter] = useState<"all" | RentalBookingStatus>("Berjalan");
+  const [rentalStatusFilter, setRentalStatusFilter] = useState<"all" | RentalBookingStatus>(
+    "Berjalan",
+  );
   const [rentalSaving, setRentalSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [printWhenReady, setPrintWhenReady] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!active) return;
-      if (error) setAuthError(friendlyError(error));
-      setSession(data.session);
-      setAuthLoading(false);
-    }).catch((error: unknown) => {
-      if (!active) return;
-      setAuthError(friendlyError(error));
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    void supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) setAuthError(friendlyError(error));
+        setSession(data.session);
+        setAuthLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setAuthError(friendlyError(error));
+        setAuthLoading(false);
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
     });
     return () => {
@@ -527,34 +580,41 @@ function Index() {
         setRoleCheckedFor(session.user.id);
         if (!nextRole) return;
 
-        const [settings, cloudClients, cloudVehicles, cloudInvoices, cloudRentals] = await Promise.all([
-          getSettings(),
-          listClients(),
-          listVehicles(),
-          listAllInvoices(),
-          listRentalBookings(),
-        ]);
+        const [settings, cloudClients, cloudVehicles, cloudInvoices, cloudRentals] =
+          await Promise.all([
+            getSettings(),
+            listClients(),
+            listVehicles(),
+            listAllInvoices(),
+            listRentalBookings(),
+          ]);
         if (!active) return;
         setCompanySettings(settings);
-        setClients(cloudClients.map((client) => ({
-          id: client.id,
-          company: client.company_name,
-          pic: client.pic_name ?? "",
-          phone: client.phone ?? "",
-          email: client.email ?? "",
-          address: client.address ?? "",
-        })));
-        setVehicles(cloudVehicles.map((vehicle) => ({
-          id: vehicle.id,
-          type: vehicle.car_type,
-          plateNumber: vehicle.plate_number,
-          defaultPrice: Number(vehicle.default_price ?? 0),
-        })));
+        setClients(
+          cloudClients.map((client) => ({
+            id: client.id,
+            company: client.company_name,
+            pic: client.pic_name ?? "",
+            phone: client.phone ?? "",
+            email: client.email ?? "",
+            address: client.address ?? "",
+          })),
+        );
+        setVehicles(
+          cloudVehicles.map((vehicle) => ({
+            id: vehicle.id,
+            type: vehicle.car_type,
+            plateNumber: vehicle.plate_number,
+            defaultPrice: Number(vehicle.default_price ?? 0),
+          })),
+        );
         setInvoices(cloudInvoices);
         setRentalBookings(cloudRentals);
         const localInvoices = readStorage<InvoiceRecord[]>(STORAGE_KEYS.invoices, []);
         const cloudNumbers = new Set(cloudInvoices.map((invoice) => invoice.invoice_number));
-        setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
+        setLocalImportCount(
+          localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length,
+        );
       } catch (error) {
         if (active) {
           setRoleCheckedFor(session.user.id);
@@ -579,16 +639,20 @@ function Index() {
   }, [printWhenReady, showPreview]);
 
   const totalNominal = useMemo(
-    () => rentalBookings.reduce((sum, booking) => {
-      const isExcluded = booking.booking_status === "Dibatalkan" || booking.booking_status === "No Show";
-      const isIncluded = booking.booking_status === "Berjalan" || booking.payment_status === "Lunas";
-      return isExcluded || !isIncluded
-        ? sum
-        : sum + inclusiveDaysBetween(booking.start_date, booking.end_date) * booking.daily_rate;
-    }, 0),
+    () =>
+      rentalBookings.reduce((sum, booking) => {
+        const isExcluded =
+          booking.booking_status === "Dibatalkan" || booking.booking_status === "No Show";
+        const isIncluded =
+          booking.booking_status === "Berjalan" || booking.payment_status === "Lunas";
+        return isExcluded || !isIncluded ? sum : sum + rentalTotal(booking);
+      }, 0),
     [rentalBookings],
   );
-  const recentInvoices = useMemo(() => [...invoices].sort((a, b) => b.invoice_date.localeCompare(a.invoice_date)).slice(0, 5), [invoices]);
+  const recentInvoices = useMemo(
+    () => [...invoices].sort((a, b) => b.invoice_date.localeCompare(a.invoice_date)).slice(0, 5),
+    [invoices],
+  );
   const runningRentalCount = useMemo(
     () => rentalBookings.filter((booking) => booking.booking_status === "Berjalan").length,
     [rentalBookings],
@@ -596,14 +660,17 @@ function Index() {
   const filteredRentalBookings = useMemo(() => {
     const term = rentalSearch.trim().toLowerCase();
     return rentalBookings.filter((booking) => {
-      const matchesStatus = rentalStatusFilter === "all" || booking.booking_status === rentalStatusFilter;
-      const matchesSearch = !term || [
-        booking.car_type,
-        booking.plate_number,
-        booking.customer_name,
-        booking.whatsapp ?? "",
-        booking.route ?? "",
-      ].some((value) => value.toLowerCase().includes(term));
+      const matchesStatus =
+        rentalStatusFilter === "all" || booking.booking_status === rentalStatusFilter;
+      const matchesSearch =
+        !term ||
+        [
+          booking.car_type,
+          booking.plate_number,
+          booking.customer_name,
+          booking.whatsapp ?? "",
+          booking.route ?? "",
+        ].some((value) => value.toLowerCase().includes(term));
       return matchesStatus && matchesSearch;
     });
   }, [rentalBookings, rentalSearch, rentalStatusFilter]);
@@ -612,17 +679,22 @@ function Index() {
     const yearNow = new Date().getFullYear();
     return invoices.filter((invoice) => {
       const invoiceDate = new Date(invoice.invoice_date);
-      return !Number.isNaN(invoiceDate.getTime()) && invoiceDate.getMonth() === monthNow && invoiceDate.getFullYear() === yearNow;
+      return (
+        !Number.isNaN(invoiceDate.getTime()) &&
+        invoiceDate.getMonth() === monthNow &&
+        invoiceDate.getFullYear() === yearNow
+      );
     }).length;
   }, [invoices]);
 
   const menuItems = [
     { key: "dashboard", label: "Dashboard" },
+    { key: "rentals", label: "Rental" },
+    { key: "unitIncome", label: "Pendapatan / Kota" },
+    { key: "invoiceDashboard", label: "Dashboard Invoice" },
     { key: "create", label: "Buat Invoice" },
     { key: "history", label: "Riwayat Invoice" },
     { key: "clients", label: "Data Klien" },
-    { key: "vehicles", label: "Data Kendaraan" },
-    { key: "rentals", label: "Rental Berjalan" },
     { key: "settings", label: "Pengaturan Perusahaan" },
   ] as const;
   const mobilePrimaryItems = [
@@ -660,7 +732,7 @@ function Index() {
         if (itemIndex !== index) return item;
         const nextItem = { ...item, [field]: value };
         if (field === "days") nextItem.days = Number(value) || 0;
-        if (field === "price_per_day") nextItem.price_per_day = Number(value) || 0;
+        if (field === "price_per_day") nextItem.price_per_day = parseRupiah(String(value));
         return nextItem;
       }),
     }));
@@ -677,7 +749,7 @@ function Index() {
         if (chargeIndex !== index) return charge;
         return {
           ...charge,
-          [field]: field === "amount" ? Number(value) || 0 : value,
+          [field]: field === "amount" ? parseRupiah(String(value)) : value,
         };
       }),
     }));
@@ -696,7 +768,9 @@ function Index() {
   function removeAdditionalCharge(index: number) {
     setForm((current) => ({
       ...current,
-      additional_charges: (current.additional_charges ?? []).filter((_, chargeIndex) => chargeIndex !== index),
+      additional_charges: (current.additional_charges ?? []).filter(
+        (_, chargeIndex) => chargeIndex !== index,
+      ),
     }));
   }
 
@@ -708,10 +782,7 @@ function Index() {
         const startDate = field === "start" ? value : item.service_date;
         const endDate =
           field === "end" ? value : addDaysToISODate(item.service_date, item.days - 1);
-        if (
-          field === "end" &&
-          (!startDate || inclusiveDaysBetween(startDate, endDate) > 365)
-        )
+        if (field === "end" && (!startDate || inclusiveDaysBetween(startDate, endDate) > 365))
           return item;
         if (field === "start" && !startDate) return { ...item, service_date: "" };
         const days = inclusiveDaysBetween(startDate, endDate);
@@ -741,7 +812,10 @@ function Index() {
   function removeItemRow(index: number) {
     setForm((current) => ({
       ...current,
-      items: current.items.length > 1 ? current.items.filter((_, itemIndex) => itemIndex !== index) : current.items,
+      items:
+        current.items.length > 1
+          ? current.items.filter((_, itemIndex) => itemIndex !== index)
+          : current.items,
     }));
   }
 
@@ -810,18 +884,39 @@ function Index() {
       window.alert("Nama perusahaan atau klien wajib diisi.");
       return;
     }
-    if (form.items.some((item) => !item.car_type.trim() || !item.service_date || item.days <= 0 || item.days > 365 || item.price_per_day < 0)) {
-      window.alert("Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, rentang tanggal, hari, dan harga per hari.");
+    if (
+      form.items.some(
+        (item) =>
+          !item.car_type.trim() ||
+          !item.service_date ||
+          item.days <= 0 ||
+          item.days > 365 ||
+          item.price_per_day < 0,
+      )
+    ) {
+      window.alert(
+        "Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, rentang tanggal, hari, dan harga per hari.",
+      );
       return;
     }
-    if ((form.additional_charges ?? []).some((charge) =>
-      !charge.description.trim() || !Number.isInteger(charge.amount) || charge.amount < 0 || charge.amount > 1_000_000_000
-    )) {
-      window.alert("Terdapat biaya tambahan yang belum valid. Isi keterangan dan pastikan nominalnya tidak negatif.");
+    if (
+      (form.additional_charges ?? []).some(
+        (charge) =>
+          !charge.description.trim() ||
+          !Number.isInteger(charge.amount) ||
+          charge.amount < 0 ||
+          charge.amount > 1_000_000_000,
+      )
+    ) {
+      window.alert(
+        "Terdapat biaya tambahan yang belum valid. Isi keterangan dan pastikan nominalnya tidak negatif.",
+      );
       return;
     }
 
-    const duplicate = invoices.find((invoice) => invoice.invoice_number === cleanNumber && invoice.id !== selectedInvoiceId);
+    const duplicate = invoices.find(
+      (invoice) => invoice.invoice_number === cleanNumber && invoice.id !== selectedInvoiceId,
+    );
     if (duplicate) {
       window.alert("Nomor invoice sudah digunakan. Gunakan nomor yang berbeda.");
       return;
@@ -856,7 +951,9 @@ function Index() {
     if (typeof globalThis.Buffer === "undefined") {
       Object.defineProperty(globalThis, "Buffer", { configurable: true, value: Buffer });
     }
-    const blob = await pdf(<InvoicePDFDocument invoice={form} company={companySettings} />).toBlob();
+    const blob = await pdf(
+      <InvoicePDFDocument invoice={form} company={companySettings} />,
+    ).toBlob();
     emitDownload(invoiceFilename(form.invoice_number, form.client_name), blob);
   }
 
@@ -892,14 +989,17 @@ function Index() {
         address: clientForm.address.trim(),
       };
       const id = await saveClient(client);
-      setClients((current) => [{
-        id,
-        company: client.company_name,
-        pic: client.pic_name,
-        phone: client.phone,
-        email: client.email,
-        address: client.address,
-      }, ...current]);
+      setClients((current) => [
+        {
+          id,
+          company: client.company_name,
+          pic: client.pic_name,
+          phone: client.phone,
+          email: client.email,
+          address: client.address,
+        },
+        ...current,
+      ]);
       setClientForm({ company: "", pic: "", phone: "", email: "", address: "" });
       window.alert("Data klien berhasil disimpan ke Supabase.");
     } catch (error) {
@@ -919,12 +1019,15 @@ function Index() {
         default_price: parseRupiah(vehicleForm.defaultPrice || "0"),
       };
       const id = await saveVehicle(vehicle);
-      setVehicles((current) => [{
-        id,
-        type: vehicle.car_type,
-        plateNumber: vehicle.plate_number,
-        defaultPrice: vehicle.default_price,
-      }, ...current]);
+      setVehicles((current) => [
+        {
+          id,
+          type: vehicle.car_type,
+          plateNumber: vehicle.plate_number,
+          defaultPrice: vehicle.default_price,
+        },
+        ...current,
+      ]);
       setVehicleForm({ type: "", plateNumber: "", defaultPrice: "" });
       window.alert("Data kendaraan berhasil disimpan ke Supabase.");
     } catch (error) {
@@ -947,6 +1050,7 @@ function Index() {
     setRentalForm({
       id: booking.id,
       vehicle_id: booking.vehicle_id ?? "",
+      city: booking.city,
       car_type: booking.car_type,
       plate_number: booking.plate_number,
       customer_name: booking.customer_name,
@@ -955,6 +1059,7 @@ function Index() {
       end_date: booking.end_date,
       service: booking.service,
       route: booking.route ?? "",
+      normal_rate: booking.normal_rate === null ? "" : String(booking.normal_rate),
       daily_rate: String(booking.daily_rate),
       deposit: String(booking.deposit),
       paid: String(booking.paid),
@@ -970,9 +1075,14 @@ function Index() {
     event.preventDefault();
     const vehicle = vehicles.find((item) => item.id === rentalForm.vehicle_id);
     const days = inclusiveDaysBetween(rentalForm.start_date, rentalForm.end_date);
-    const dailyRate = Number(rentalForm.daily_rate || 0);
-    const deposit = Number(rentalForm.deposit || 0);
-    const paid = Number(rentalForm.paid || 0);
+    const dailyRate = parseRupiah(rentalForm.daily_rate || "0");
+    if (!rentalForm.normal_rate.trim()) {
+      window.alert("Harga normal per hari wajib diisi agar keuntungan bersih dapat dihitung.");
+      return;
+    }
+    const normalRate = parseRupiah(rentalForm.normal_rate);
+    const deposit = parseRupiah(rentalForm.deposit || "0");
+    const paid = parseRupiah(rentalForm.paid || "0");
 
     if (!vehicle) {
       window.alert("Pilih kendaraan dari Data Kendaraan terlebih dahulu.");
@@ -982,13 +1092,19 @@ function Index() {
       window.alert("Nama pelanggan wajib diisi.");
       return;
     }
+    if (!rentalForm.city.trim() || isMedanCity(rentalForm.city)) {
+      window.alert("Masukkan kota tujuan order di luar Medan.");
+      return;
+    }
     if (!days) {
       window.alert("Tanggal selesai harus sama dengan atau setelah tanggal mulai.");
       return;
     }
-    if ([dailyRate, deposit, paid].some((amount) =>
-      !Number.isSafeInteger(amount) || amount < 0 || amount > 10_000_000_000
-    )) {
+    if (
+      [normalRate, dailyRate, deposit, paid].some(
+        (amount) => !Number.isSafeInteger(amount) || amount < 0 || amount > 10_000_000_000,
+      )
+    ) {
       window.alert("Nominal harga, deposit, dan pembayaran harus berupa angka bulat yang wajar.");
       return;
     }
@@ -996,6 +1112,7 @@ function Index() {
     const payload: RentalBookingInput = {
       ...(rentalForm.id ? { id: rentalForm.id } : {}),
       vehicle_id: vehicle.id,
+      city: rentalForm.city.trim(),
       car_type: vehicle.type,
       plate_number: vehicle.plateNumber,
       customer_name: rentalForm.customer_name.trim(),
@@ -1005,6 +1122,7 @@ function Index() {
       service: rentalForm.service,
       route: rentalForm.route.trim() || null,
       daily_rate: dailyRate,
+      normal_rate: normalRate,
       deposit,
       paid,
       payment_status: rentalForm.payment_status,
@@ -1016,8 +1134,10 @@ function Index() {
     try {
       const saved = await saveRentalBooking(payload);
       setRentalBookings((current) =>
-        [saved, ...current.filter((booking) => booking.id !== saved.id)]
-          .sort((a, b) => b.start_date.localeCompare(a.start_date) || b.created_at.localeCompare(a.created_at)),
+        [saved, ...current.filter((booking) => booking.id !== saved.id)].sort(
+          (a, b) =>
+            b.start_date.localeCompare(a.start_date) || b.created_at.localeCompare(a.created_at),
+        ),
       );
       setRentalStatusFilter("all");
       setRentalSearch("");
@@ -1077,14 +1197,24 @@ function Index() {
       setLocalImportCount(0);
       return;
     }
-    if (!window.confirm(`Impor ${toImport.length} invoice dari browser ini ke Supabase? Data lokal tidak akan dihapus.`)) return;
+    if (
+      !window.confirm(
+        `Impor ${toImport.length} invoice dari browser ini ke Supabase? Data lokal tidak akan dihapus.`,
+      )
+    )
+      return;
 
     setImportPending(true);
     let imported = 0;
     const importedInvoices: InvoiceRecord[] = [];
     try {
       for (const invoice of toImport) {
-        const { id: _localId, createdAt: _createdAt, updatedAt: _updatedAt, ...invoiceData } = invoice;
+        const {
+          id: _localId,
+          createdAt: _createdAt,
+          updatedAt: _updatedAt,
+          ...invoiceData
+        } = invoice;
         const id = await saveCloudInvoice({
           ...invoiceData,
           client_id: null,
@@ -1092,17 +1222,31 @@ function Index() {
           additional_charges: invoice.additional_charges ?? [],
         });
         const timestamp = new Date().toISOString();
-        importedInvoices.push({ ...invoice, id, client_id: null, createdAt: timestamp, updatedAt: timestamp });
+        importedInvoices.push({
+          ...invoice,
+          id,
+          client_id: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
         cloudNumbers.add(invoice.invoice_number);
         imported += 1;
       }
       setInvoices((current) => [...importedInvoices, ...current]);
-      setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
-      window.alert(`${imported} invoice berhasil diimpor. Data lokal tetap tersimpan di browser ini.`);
+      setLocalImportCount(
+        localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length,
+      );
+      window.alert(
+        `${imported} invoice berhasil diimpor. Data lokal tetap tersimpan di browser ini.`,
+      );
     } catch (error) {
       setInvoices((current) => [...importedInvoices, ...current]);
-      setLocalImportCount(localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length);
-      window.alert(`${imported} invoice berhasil diimpor sebelum terjadi kesalahan: ${friendlyError(error)}. Anda dapat mencoba lagi untuk invoice yang belum masuk.`);
+      setLocalImportCount(
+        localInvoices.filter((invoice) => !cloudNumbers.has(invoice.invoice_number)).length,
+      );
+      window.alert(
+        `${imported} invoice berhasil diimpor sebelum terjadi kesalahan: ${friendlyError(error)}. Anda dapat mencoba lagi untuk invoice yang belum masuk.`,
+      );
     } finally {
       setImportPending(false);
     }
@@ -1138,9 +1282,14 @@ function Index() {
   if (!session) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted p-5">
-        <form onSubmit={submitAuth} className="w-full max-w-md space-y-5 rounded-[28px] border border-border bg-white p-7 shadow-card">
+        <form
+          onSubmit={submitAuth}
+          className="w-full max-w-md space-y-5 rounded-[28px] border border-border bg-white p-7 shadow-card"
+        >
           <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Vicky Rental Nusantara</div>
+            <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+              Vicky Rental Nusantara
+            </div>
             <h1 className="mt-2 text-2xl font-bold text-foreground">Masuk ke Invoice</h1>
           </div>
           <label className="block space-y-2 text-sm">
@@ -1150,7 +1299,9 @@ function Index() {
               type="email"
               autoComplete="email"
               value={authForm.email}
-              onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+              onChange={(event) =>
+                setAuthForm((current) => ({ ...current, email: event.target.value }))
+              }
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
             />
           </label>
@@ -1162,11 +1313,17 @@ function Index() {
               minLength={6}
               autoComplete="current-password"
               value={authForm.password}
-              onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+              onChange={(event) =>
+                setAuthForm((current) => ({ ...current, password: event.target.value }))
+              }
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
             />
           </label>
-          {authError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">{authError}</p>}
+          {authError && (
+            <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-700">
+              {authError}
+            </p>
+          )}
           <button
             type="submit"
             disabled={authPending}
@@ -1192,7 +1349,9 @@ function Index() {
       <div className="flex min-h-screen items-center justify-center bg-muted p-5">
         <div className="w-full max-w-md space-y-4 rounded-[28px] border border-border bg-white p-7 shadow-card">
           <h1 className="text-xl font-bold text-foreground">Data Supabase gagal dimuat</h1>
-          <p role="alert" className="text-sm text-muted-foreground">{cloudError}</p>
+          <p role="alert" className="text-sm text-muted-foreground">
+            {cloudError}
+          </p>
           <button
             type="button"
             onClick={() => setReloadKey((value) => value + 1)}
@@ -1200,7 +1359,13 @@ function Index() {
           >
             Coba lagi
           </button>
-          <button type="button" onClick={signOut} className="w-full text-sm text-muted-foreground underline">Keluar</button>
+          <button
+            type="button"
+            onClick={signOut}
+            className="w-full text-sm text-muted-foreground underline"
+          >
+            Keluar
+          </button>
         </div>
       </div>
     );
@@ -1212,14 +1377,23 @@ function Index() {
         <div className="w-full max-w-lg space-y-4 rounded-[28px] border border-border bg-white p-7 shadow-card">
           <h1 className="text-xl font-bold text-foreground">Akun belum diberi akses</h1>
           <p className="text-sm leading-6 text-muted-foreground">
-            Anda berhasil masuk, tetapi akun ini belum memiliki peran admin/staf. Admin proyek dapat mengganti placeholder email lalu menjalankan perintah ini lewat Supabase SQL Editor:
+            Anda berhasil masuk, tetapi akun ini belum memiliki peran admin/staf. Admin proyek dapat
+            mengganti placeholder email lalu menjalankan perintah ini lewat Supabase SQL Editor:
           </p>
           <code className="block overflow-x-auto rounded-xl bg-muted p-3 text-xs">
-            insert into public.user_roles (user_id, role)<br />
-            select id, 'staff' from auth.users where email = '&lt;EMAIL_AKUN&gt;'<br />
+            insert into public.user_roles (user_id, role)
+            <br />
+            select id, 'staff' from auth.users where email = '&lt;EMAIL_AKUN&gt;'
+            <br />
             on conflict (user_id, role) do nothing;
           </code>
-          <button type="button" onClick={signOut} className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Keluar</button>
+          <button
+            type="button"
+            onClick={signOut}
+            className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
+          >
+            Keluar
+          </button>
         </div>
       </div>
     );
@@ -1230,9 +1404,15 @@ function Index() {
       <div className="mx-auto flex max-w-[1600px] gap-6 p-5 pb-28 lg:p-8">
         <aside className="hidden w-72 shrink-0 rounded-[28px] bg-slate-950 p-5 text-white lg:block">
           <div className="mb-8 flex items-center gap-3">
-            <img src={companySettings.logo_path || DEFAULT_LOGO} alt="logo" className="h-12 w-12 rounded-xl object-contain" />
+            <img
+              src={companySettings.logo_path || DEFAULT_LOGO}
+              alt="logo"
+              className="h-12 w-12 rounded-xl object-contain"
+            />
             <div>
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-300">Manajemen Rental</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
+                Manajemen Rental
+              </div>
               <div className="text-lg font-bold">VRN</div>
             </div>
           </div>
@@ -1243,7 +1423,9 @@ function Index() {
                 type="button"
                 onClick={() => setActiveTab(item.key)}
                 className={`flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-medium transition ${
-                  activeTab === item.key ? "bg-white/12 text-white" : "text-slate-300 hover:bg-white/5 hover:text-white"
+                  activeTab === item.key
+                    ? "bg-white/12 text-white"
+                    : "text-slate-300 hover:bg-white/5 hover:text-white"
                 }`}
               >
                 <span>{item.label}</span>
@@ -1254,8 +1436,23 @@ function Index() {
 
         <main className="flex-1 space-y-6">
           <div className="flex flex-col gap-3 rounded-[28px] border border-border bg-white p-5 shadow-card md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="mt-2 text-3xl font-bold text-foreground">PT VICKY RENTAL NUSANTARA</h1>
+            <div className="flex items-center gap-4">
+              <img
+                src={companySettings.logo_path || DEFAULT_LOGO}
+                alt="Logo Vicky Rental Nusantara"
+                className="h-14 w-14 rounded-xl object-contain"
+              />
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {companySettings.company_name}
+                </div>
+                <h1 className="mt-1 text-2xl font-bold text-foreground">
+                  {menuItems.find((item) => item.key === activeTab)?.label ?? "Manajemen Armada"}
+                </h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Pantau catatan order rental luar Medan.
+                </p>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1267,7 +1464,10 @@ function Index() {
               </button>
               <button
                 type="button"
-                onClick={() => { cancelRentalEdit(); setActiveTab("rentals"); }}
+                onClick={() => {
+                  setNewRentalRequest((value) => value + 1);
+                  setActiveTab("rentals");
+                }}
                 className="rounded-xl border border-border px-4 py-3 text-sm font-semibold text-foreground"
               >
                 + Catat Rental
@@ -1308,9 +1508,13 @@ function Index() {
                 <button
                   type="button"
                   aria-label="Buka menu lainnya"
-                  aria-current={mobileMoreItems.some((item) => item.key === activeTab) ? "page" : undefined}
+                  aria-current={
+                    mobileMoreItems.some((item) => item.key === activeTab) ? "page" : undefined
+                  }
                   className={`flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold leading-tight ${
-                    mobileMoreItems.some((item) => item.key === activeTab) ? "text-slate-950" : "text-muted-foreground"
+                    mobileMoreItems.some((item) => item.key === activeTab)
+                      ? "text-slate-950"
+                      : "text-muted-foreground"
                   }`}
                 >
                   <Ellipsis aria-hidden="true" className="h-5 w-5" />
@@ -1328,7 +1532,14 @@ function Index() {
               </SheetHeader>
               <div className="grid grid-cols-2 gap-3">
                 {mobileMoreItems.map((item) => {
-                  const Icon = item.key === "clients" ? Users : item.key === "vehicles" ? CarFront : Settings;
+                  const Icon =
+                    item.key === "clients"
+                      ? Users
+                      : item.key === "rentals"
+                        ? CarFront
+                        : item.key === "dashboard" || item.key === "invoiceDashboard"
+                          ? LayoutDashboard
+                          : Settings;
                   return (
                     <button
                       key={item.key}
@@ -1356,7 +1567,9 @@ function Index() {
           {localImportCount > 0 && (
             <section className="flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="font-semibold text-amber-950">Ada {localImportCount} invoice lama di browser ini</div>
+                <div className="font-semibold text-amber-950">
+                  Ada {localImportCount} invoice lama di browser ini
+                </div>
                 <p className="mt-1 text-amber-900">
                   Impor jika ingin memindahkannya ke Supabase. Invoice lokal tidak akan dihapus.
                 </p>
@@ -1372,7 +1585,26 @@ function Index() {
             </section>
           )}
 
-          {activeTab === "dashboard" && (
+          {["dashboard", "vehicles", "rentals", "unitIncome"].includes(activeTab) && (
+            <FleetManagement
+              section={
+                activeTab === "vehicles"
+                  ? "vehicles"
+                  : activeTab === "rentals"
+                    ? "rentals"
+                    : activeTab === "unitIncome"
+                      ? "unitIncome"
+                      : "dashboard"
+              }
+              onSectionChange={(section) =>
+                setActiveTab(section === "unitIncome" ? "unitIncome" : section)
+              }
+              onDataChanged={() => setReloadKey((value) => value + 1)}
+              newRentalRequest={newRentalRequest}
+            />
+          )}
+
+          {activeTab === "invoiceDashboard" && (
             <>
               <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="rounded-[24px] border border-border bg-white p-5 shadow-card">
@@ -1381,7 +1613,9 @@ function Index() {
                 </div>
                 <div className="rounded-[24px] border border-border bg-white p-5 shadow-card">
                   <div className="text-sm text-muted-foreground">Total Nominal Rental</div>
-                  <div className="mt-2 text-3xl font-bold text-foreground">{formatRupiah(totalNominal)}</div>
+                  <div className="mt-2 text-3xl font-bold text-foreground">
+                    {formatRupiah(totalNominal)}
+                  </div>
                 </div>
                 <div className="rounded-[24px] border border-border bg-white p-5 shadow-card">
                   <div className="text-sm text-muted-foreground">Invoice Bulan Ini</div>
@@ -1389,8 +1623,14 @@ function Index() {
                 </div>
                 <div className="rounded-[24px] border border-border bg-white p-5 shadow-card">
                   <div className="text-sm text-muted-foreground">Invoice Terbaru</div>
-                  <div className="mt-2 text-xl font-bold text-foreground">{recentInvoices[0]?.invoice_number || "-"}</div>
-                  <div className="text-sm text-muted-foreground">{recentInvoices[0] ? formatDateID(recentInvoices[0].invoice_date, true) : "Belum ada"}</div>
+                  <div className="mt-2 text-xl font-bold text-foreground">
+                    {recentInvoices[0]?.invoice_number || "-"}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {recentInvoices[0]
+                      ? formatDateID(recentInvoices[0].invoice_date, true)
+                      : "Belum ada"}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -1398,7 +1638,9 @@ function Index() {
                   className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-5 text-left shadow-card"
                 >
                   <div className="text-sm text-emerald-800">Mobil Sedang Berjalan</div>
-                  <div className="mt-2 text-4xl font-bold text-emerald-950">{runningRentalCount}</div>
+                  <div className="mt-2 text-4xl font-bold text-emerald-950">
+                    {runningRentalCount}
+                  </div>
                   <div className="text-sm text-emerald-800">Lihat data rental aktif</div>
                 </button>
               </section>
@@ -1406,23 +1648,48 @@ function Index() {
               <section className="rounded-[28px] border border-border bg-white p-5 shadow-card">
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="text-xl font-bold text-foreground">Invoice Terbaru</h2>
-                  <button type="button" onClick={() => setActiveTab("history")} className="text-sm font-medium text-primary underline-offset-4 hover:underline">Lihat semua</button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("history")}
+                    className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    Lihat semua
+                  </button>
                 </div>
                 <div className="space-y-3">
                   {recentInvoices.length === 0 ? (
-                    <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">Belum ada invoice tersimpan.</div>
+                    <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
+                      Belum ada invoice tersimpan.
+                    </div>
                   ) : (
                     recentInvoices.map((invoice) => (
-                      <div key={invoice.id} className="flex flex-col gap-3 rounded-2xl border border-border p-4 md:flex-row md:items-center md:justify-between">
+                      <div
+                        key={invoice.id}
+                        className="flex flex-col gap-3 rounded-2xl border border-border p-4 md:flex-row md:items-center md:justify-between"
+                      >
                         <div>
-                          <div className="font-semibold text-foreground">{invoice.invoice_number}</div>
-                          <div className="text-sm text-muted-foreground">{invoice.client_name} • {formatDateID(invoice.invoice_date, true)}</div>
+                          <div className="font-semibold text-foreground">
+                            {invoice.invoice_number}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {invoice.client_name} • {formatDateID(invoice.invoice_date, true)}
+                          </div>
                         </div>
                         <div className="flex items-center gap-3">
                           <div className="text-right">
-                            <div className="font-semibold text-foreground">{formatRupiah(grandTotal(invoice.items, invoice.additional_charges ?? []))}</div>
+                            <div className="font-semibold text-foreground">
+                              {formatRupiah(
+                                grandTotal(invoice.items, invoice.additional_charges ?? []),
+                              )}
+                            </div>
                           </div>
-                          <button type="button" onClick={() => loadEditInvoice(invoice)} className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground">Edit</button>
+                          <button
+                            type="button"
+                            onClick={() => loadEditInvoice(invoice)}
+                            className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground"
+                          >
+                            Edit
+                          </button>
                         </div>
                       </div>
                     ))
@@ -1432,7 +1699,7 @@ function Index() {
             </>
           )}
 
-          {activeTab === "rentals" && (
+          {activeTab === "legacyRentals" && (
             <section className="space-y-6">
               <div>
                 <h2 className="text-2xl font-bold text-foreground">Data Mobil Berjalan</h2>
@@ -1442,12 +1709,17 @@ function Index() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
-                {([
-                  ["Berjalan", "Sedang Disewa", "text-emerald-700"],
-                  ["Booking", "Booking", "text-amber-700"],
-                  ["Selesai", "Selesai", "text-slate-700"],
-                ] as const).map(([status, label, color]) => (
-                  <div key={status} className="rounded-[24px] border border-border bg-white p-5 shadow-card">
+                {(
+                  [
+                    ["Berjalan", "Sedang Disewa", "text-emerald-700"],
+                    ["Booking", "Booking", "text-amber-700"],
+                    ["Selesai", "Selesai", "text-slate-700"],
+                  ] as const
+                ).map(([status, label, color]) => (
+                  <div
+                    key={status}
+                    className="rounded-[24px] border border-border bg-white p-5 shadow-card"
+                  >
                     <div className="text-sm text-muted-foreground">{label}</div>
                     <div className={`mt-2 text-3xl font-bold ${color}`}>
                       {rentalBookings.filter((booking) => booking.booking_status === status).length}
@@ -1456,7 +1728,10 @@ function Index() {
                 ))}
               </div>
 
-              <form onSubmit={submitRentalBooking} className="space-y-5 rounded-[28px] border border-border bg-white p-5 shadow-card">
+              <form
+                onSubmit={submitRentalBooking}
+                className="space-y-5 rounded-[28px] border border-border bg-white p-5 shadow-card"
+              >
                 <div>
                   <h3 className="text-xl font-bold text-foreground">
                     {rentalForm.id ? "Edit Data Rental" : "Catat Rental Berjalan"}
@@ -1477,32 +1752,88 @@ function Index() {
                     >
                       <option value="">Pilih kendaraan</option>
                       {vehicles.map((vehicle) => (
-                        <option key={vehicle.id} value={vehicle.id}>{vehicle.type} · {vehicle.plateNumber}</option>
+                        <option key={vehicle.id} value={vehicle.id}>
+                          {vehicle.type} · {vehicle.plateNumber}
+                        </option>
                       ))}
                     </select>
                     {vehicles.length === 0 && (
-                      <span className="block text-xs text-amber-700">Tambahkan kendaraan melalui menu Data Kendaraan terlebih dahulu.</span>
+                      <span className="block text-xs text-amber-700">
+                        Tambahkan kendaraan melalui menu Data Kendaraan terlebih dahulu.
+                      </span>
                     )}
                   </label>
                   <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Kota tujuan order *</span>
+                    <input
+                      required
+                      value={rentalForm.city}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, city: event.target.value }))
+                      }
+                      placeholder="Ketik kota di luar Medan"
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Nama pelanggan *</span>
-                    <input required value={rentalForm.customer_name} onChange={(event) => setRentalForm((current) => ({ ...current, customer_name: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      required
+                      value={rentalForm.customer_name}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          customer_name: event.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">No. WhatsApp</span>
-                    <input inputMode="tel" value={rentalForm.whatsapp} onChange={(event) => setRentalForm((current) => ({ ...current, whatsapp: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      inputMode="tel"
+                      value={rentalForm.whatsapp}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, whatsapp: event.target.value }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Tanggal mulai *</span>
-                    <input required type="date" value={rentalForm.start_date} onChange={(event) => setRentalForm((current) => ({ ...current, start_date: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      required
+                      type="date"
+                      value={rentalForm.start_date}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, start_date: event.target.value }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Tanggal selesai *</span>
-                    <input required type="date" min={rentalForm.start_date || undefined} value={rentalForm.end_date} onChange={(event) => setRentalForm((current) => ({ ...current, end_date: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      required
+                      type="date"
+                      min={rentalForm.start_date || undefined}
+                      value={rentalForm.end_date}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, end_date: event.target.value }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Layanan</span>
-                    <select value={rentalForm.service} onChange={(event) => setRentalForm((current) => ({ ...current, service: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5">
+                    <select
+                      value={rentalForm.service}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, service: event.target.value }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    >
                       <option>Dengan Sopir</option>
                       <option>Lepas Kunci</option>
                       <option>Rent To Rent (LK)</option>
@@ -1511,44 +1842,143 @@ function Index() {
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Tujuan / rute</span>
-                    <input value={rentalForm.route} onChange={(event) => setRentalForm((current) => ({ ...current, route: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      value={rentalForm.route}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, route: event.target.value }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
-                    <span className="font-medium text-foreground">Harga per hari (Rp)</span>
-                    <input type="number" min={0} step={1} value={rentalForm.daily_rate} onChange={(event) => setRentalForm((current) => ({ ...current, daily_rate: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <span className="font-medium text-foreground">
+                      Harga normal per hari (Rp) *
+                    </span>
+                    <input
+                      required
+                      inputMode="numeric"
+                      value={formatRupiahInput(rentalForm.normal_rate)}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          normal_rate: formatRupiahInput(event.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">
+                      Harga jual ke tamu per hari (Rp) *
+                    </span>
+                    <input
+                      required
+                      inputMode="numeric"
+                      value={formatRupiahInput(rentalForm.daily_rate)}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          daily_rate: formatRupiahInput(event.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Deposit (Rp)</span>
-                    <input type="number" min={0} step={1} value={rentalForm.deposit} onChange={(event) => setRentalForm((current) => ({ ...current, deposit: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      inputMode="numeric"
+                      value={formatRupiahInput(rentalForm.deposit)}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          deposit: formatRupiahInput(event.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Sudah dibayar (Rp)</span>
-                    <input type="number" min={0} step={1} value={rentalForm.paid} onChange={(event) => setRentalForm((current) => ({ ...current, paid: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <input
+                      inputMode="numeric"
+                      value={formatRupiahInput(rentalForm.paid)}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          paid: formatRupiahInput(event.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Status pembayaran</span>
-                    <select value={rentalForm.payment_status} onChange={(event) => setRentalForm((current) => ({ ...current, payment_status: event.target.value as RentalPaymentStatus }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5">
-                      <option>Belum Bayar</option><option>DP</option><option>Lunas</option><option>Dibatalkan</option>
+                    <select
+                      value={rentalForm.payment_status}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          payment_status: event.target.value as RentalPaymentStatus,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    >
+                      <option>Belum Bayar</option>
+                      <option>DP</option>
+                      <option>Lunas</option>
+                      <option>Dibatalkan</option>
                     </select>
                   </label>
                   <label className="space-y-2 text-sm">
                     <span className="font-medium text-foreground">Status rental</span>
-                    <select value={rentalForm.booking_status} onChange={(event) => setRentalForm((current) => ({ ...current, booking_status: event.target.value as RentalBookingStatus }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5">
-                      <option>Booking</option><option>Berjalan</option><option>Selesai</option><option>Dibatalkan</option><option>No Show</option>
+                    <select
+                      value={rentalForm.booking_status}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({
+                          ...current,
+                          booking_status: event.target.value as RentalBookingStatus,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    >
+                      <option>Booking</option>
+                      <option>Berjalan</option>
+                      <option>Selesai</option>
+                      <option>Dibatalkan</option>
+                      <option>No Show</option>
                     </select>
                   </label>
                   <label className="space-y-2 text-sm md:col-span-2 xl:col-span-3">
                     <span className="font-medium text-foreground">Catatan</span>
-                    <textarea value={rentalForm.notes} onChange={(event) => setRentalForm((current) => ({ ...current, notes: event.target.value }))} className="min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                    <textarea
+                      value={rentalForm.notes}
+                      onChange={(event) =>
+                        setRentalForm((current) => ({ ...current, notes: event.target.value }))
+                      }
+                      className="min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
                   </label>
                 </div>
 
                 <div className="flex flex-wrap gap-3">
-                  <button type="submit" disabled={rentalSaving || vehicles.length === 0} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
-                    {rentalSaving ? "Menyimpan..." : rentalForm.id ? "Simpan Perubahan" : "Simpan Rental"}
+                  <button
+                    type="submit"
+                    disabled={rentalSaving || vehicles.length === 0}
+                    className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {rentalSaving
+                      ? "Menyimpan..."
+                      : rentalForm.id
+                        ? "Simpan Perubahan"
+                        : "Simpan Rental"}
                   </button>
                   {rentalForm.id && (
-                    <button type="button" onClick={cancelRentalEdit} className="rounded-xl border border-border px-5 py-3 text-sm font-semibold text-foreground">
+                    <button
+                      type="button"
+                      onClick={cancelRentalEdit}
+                      className="rounded-xl border border-border px-5 py-3 text-sm font-semibold text-foreground"
+                    >
                       Batal Edit
                     </button>
                   )}
@@ -1559,11 +1989,26 @@ function Index() {
                 <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
                   <div>
                     <h3 className="text-xl font-bold text-foreground">Daftar Rental</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">Pilih status Berjalan untuk melihat kendaraan yang sedang digunakan.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Pilih status Berjalan untuk melihat kendaraan yang sedang digunakan.
+                    </p>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    <input value={rentalSearch} onChange={(event) => setRentalSearch(event.target.value)} placeholder="Cari mobil / pelanggan" aria-label="Cari data rental" className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm" />
-                    <select value={rentalStatusFilter} onChange={(event) => setRentalStatusFilter(event.target.value as "all" | RentalBookingStatus)} aria-label="Filter status rental" className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm">
+                    <input
+                      value={rentalSearch}
+                      onChange={(event) => setRentalSearch(event.target.value)}
+                      placeholder="Cari mobil / pelanggan"
+                      aria-label="Cari data rental"
+                      className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm"
+                    />
+                    <select
+                      value={rentalStatusFilter}
+                      onChange={(event) =>
+                        setRentalStatusFilter(event.target.value as "all" | RentalBookingStatus)
+                      }
+                      aria-label="Filter status rental"
+                      className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm"
+                    >
                       <option value="Berjalan">Sedang Berjalan</option>
                       <option value="Booking">Booking</option>
                       <option value="Selesai">Selesai</option>
@@ -1593,18 +2038,67 @@ function Index() {
                         const remaining = Math.max(0, total - booking.paid);
                         return (
                           <tr key={booking.id} className="border-b border-border last:border-0">
-                            <td className="p-3"><div className="font-semibold text-foreground">{booking.car_type}</div><div className="text-xs text-muted-foreground">{booking.plate_number}</div></td>
-                            <td className="p-3"><div className="font-medium text-foreground">{booking.customer_name}</div><div className="text-xs text-muted-foreground">{booking.whatsapp || "Tanpa nomor WhatsApp"}</div></td>
-                            <td className="p-3"><div>{formatDateRangeID(booking.start_date, days, true)}</div><div className="text-xs text-muted-foreground">{days} hari</div></td>
-                            <td className="p-3"><div>{booking.service}</div><div className="text-xs text-muted-foreground">{booking.route || "Rute belum diisi"}</div></td>
-                            <td className="p-3 text-right"><div className="font-medium">{formatRupiah(total)}</div><div className="text-xs text-muted-foreground">Dibayar {formatRupiah(booking.paid)} · Sisa {formatRupiah(remaining)}</div></td>
-                            <td className="p-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${booking.booking_status === "Berjalan" ? "bg-emerald-100 text-emerald-800" : booking.booking_status === "Booking" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}>{booking.booking_status}</span><div className="mt-1 text-xs text-muted-foreground">{booking.payment_status}</div></td>
-                            <td className="p-3"><button type="button" onClick={() => editRentalBooking(booking)} className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground">Edit</button></td>
+                            <td className="p-3">
+                              <div className="font-semibold text-foreground">
+                                {booking.car_type}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {booking.plate_number}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="font-medium text-foreground">
+                                {booking.customer_name}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {booking.whatsapp || "Tanpa nomor WhatsApp"}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div>{formatDateRangeID(booking.start_date, days, true)}</div>
+                              <div className="text-xs text-muted-foreground">{days} hari</div>
+                            </td>
+                            <td className="p-3">
+                              <div>{booking.service}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {booking.route || "Rute belum diisi"}
+                              </div>
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="font-medium">{formatRupiah(total)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Dibayar {formatRupiah(booking.paid)} · Sisa{" "}
+                                {formatRupiah(remaining)}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${booking.booking_status === "Berjalan" ? "bg-emerald-100 text-emerald-800" : booking.booking_status === "Booking" ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-700"}`}
+                              >
+                                {booking.booking_status}
+                              </span>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {booking.payment_status}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <button
+                                type="button"
+                                onClick={() => editRentalBooking(booking)}
+                                className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground"
+                              >
+                                Edit
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
                       {filteredRentalBookings.length === 0 && (
-                        <tr><td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">Belum ada data rental untuk filter ini.</td></tr>
+                        <tr>
+                          <td colSpan={7} className="p-8 text-center text-sm text-muted-foreground">
+                            Belum ada data rental untuk filter ini.
+                          </td>
+                        </tr>
                       )}
                     </tbody>
                   </table>
@@ -1617,7 +2111,9 @@ function Index() {
             <section className="grid gap-6">
               <div className="rounded-[28px] border border-border bg-white p-5 shadow-card">
                 <div className="mb-5 flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-foreground">{selectedInvoiceId ? "Edit Invoice" : "Buat Invoice"}</h2>
+                  <h2 className="text-xl font-bold text-foreground">
+                    {selectedInvoiceId ? "Edit Invoice" : "Buat Invoice"}
+                  </h2>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -1659,34 +2155,65 @@ function Index() {
 
                 <div className="mt-8 space-y-4">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-foreground">Rincian Layanan Rental Mobil</h3>
-                    <button type="button" onClick={addItemRow} className="rounded-xl border border-border bg-muted px-3 py-2 text-sm font-semibold text-foreground">+ Tambah baris</button>
+                    <h3 className="text-lg font-bold text-foreground">
+                      Rincian Layanan Rental Mobil
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={addItemRow}
+                      className="rounded-xl border border-border bg-muted px-3 py-2 text-sm font-semibold text-foreground"
+                    >
+                      + Tambah baris
+                    </button>
                   </div>
 
                   {form.items.map((item, index) => (
-                    <div key={item.key || index} className="rounded-[24px] border border-border bg-muted p-4">
+                    <div
+                      key={item.key || index}
+                      className="rounded-[24px] border border-border bg-muted p-4"
+                    >
                       <div className="mb-4 flex items-center justify-between">
-                        <div className="text-sm font-semibold text-foreground">Baris {index + 1}</div>
+                        <div className="text-sm font-semibold text-foreground">
+                          Baris {index + 1}
+                        </div>
                         {form.items.length > 1 ? (
-                          <button type="button" onClick={() => removeItemRow(index)} className="text-sm font-medium text-destructive">Hapus</button>
+                          <button
+                            type="button"
+                            onClick={() => removeItemRow(index)}
+                            className="text-sm font-medium text-destructive"
+                          >
+                            Hapus
+                          </button>
                         ) : null}
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Jenis mobil</span>
-                          <input value={item.car_type} onChange={(event) => updateItem(index, "car_type", event.target.value)} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
+                          <input
+                            value={item.car_type}
+                            onChange={(event) => updateItem(index, "car_type", event.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Nomor polisi</span>
-                          <input value={item.plate_number} onChange={(event) => updateItem(index, "plate_number", event.target.value)} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
+                          <input
+                            value={item.plate_number}
+                            onChange={(event) =>
+                              updateItem(index, "plate_number", event.target.value)
+                            }
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Tanggal dari</span>
                           <input
                             type="date"
                             value={item.service_date}
-                            onChange={(event) => updateServiceDate(index, "start", event.target.value)}
+                            onChange={(event) =>
+                              updateServiceDate(index, "start", event.target.value)
+                            }
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
@@ -1697,19 +2224,27 @@ function Index() {
                             value={addDaysToISODate(item.service_date, item.days - 1)}
                             min={item.service_date || undefined}
                             max={addDaysToISODate(item.service_date, 364) || undefined}
-                            onChange={(event) => updateServiceDate(index, "end", event.target.value)}
+                            onChange={(event) =>
+                              updateServiceDate(index, "end", event.target.value)
+                            }
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Rute perjalanan</span>
-                          <input value={item.route} onChange={(event) => updateItem(index, "route", event.target.value)} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
+                          <input
+                            value={item.route}
+                            onChange={(event) => updateItem(index, "route", event.target.value)}
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Tipe layanan</span>
                           <input
                             value={item.service_type}
-                            onChange={(event) => updateItem(index, "service_type", event.target.value)}
+                            onChange={(event) =>
+                              updateItem(index, "service_type", event.target.value)
+                            }
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
@@ -1720,13 +2255,26 @@ function Index() {
                             min={1}
                             max={365}
                             value={item.days}
-                            onChange={(event) => updateItem(index, "days", Number(event.target.value))}
+                            onChange={(event) =>
+                              updateItem(index, "days", Number(event.target.value))
+                            }
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
                         <label className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Harga per hari</span>
-                          <input type="number" min={0} value={item.price_per_day} onChange={(event) => updateItem(index, "price_per_day", Number(event.target.value))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring" />
+                          <input
+                            inputMode="numeric"
+                            value={formatRupiahInput(item.price_per_day)}
+                            onChange={(event) =>
+                              updateItem(
+                                index,
+                                "price_per_day",
+                                formatRupiahInput(event.target.value),
+                              )
+                            }
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
                         </label>
                         <div className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Total</span>
@@ -1740,7 +2288,9 @@ function Index() {
                         <select
                           value=""
                           onChange={(event) => {
-                            const chosen = vehicles.find((vehicle) => vehicle.id === event.target.value);
+                            const chosen = vehicles.find(
+                              (vehicle) => vehicle.id === event.target.value,
+                            );
                             if (chosen) applyVehicleToForm(chosen, index);
                             event.target.value = "";
                           }}
@@ -1748,10 +2298,14 @@ function Index() {
                         >
                           <option value="">Pilih kendaraan master</option>
                           {vehicles.map((vehicle) => (
-                            <option key={vehicle.id} value={vehicle.id}>{vehicle.type} • {vehicle.plateNumber}</option>
+                            <option key={vehicle.id} value={vehicle.id}>
+                              {vehicle.type} • {vehicle.plateNumber}
+                            </option>
                           ))}
                         </select>
-                        <div className="text-sm font-semibold text-foreground">{formatRupiah(lineTotal(item.days, item.price_per_day))}</div>
+                        <div className="text-sm font-semibold text-foreground">
+                          {formatRupiah(lineTotal(item.days, item.price_per_day))}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1760,8 +2314,12 @@ function Index() {
                 <div className="mt-8 space-y-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-lg font-bold text-foreground">Biaya Tambahan Layanan / Operasional</h3>
-                      <p className="text-sm text-muted-foreground">Biaya sekali bayar, tidak dikalikan jumlah hari rental.</p>
+                      <h3 className="text-lg font-bold text-foreground">
+                        Biaya Tambahan Layanan / Operasional
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        Biaya sekali bayar, tidak dikalikan jumlah hari rental.
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -1773,9 +2331,14 @@ function Index() {
                   </div>
 
                   {(form.additional_charges ?? []).map((charge, index) => (
-                    <div key={charge.key || index} className="rounded-[24px] border border-border bg-muted p-4">
+                    <div
+                      key={charge.key || index}
+                      className="rounded-[24px] border border-border bg-muted p-4"
+                    >
                       <div className="mb-4 flex items-center justify-between">
-                        <div className="text-sm font-semibold text-foreground">Biaya {index + 1}</div>
+                        <div className="text-sm font-semibold text-foreground">
+                          Biaya {index + 1}
+                        </div>
                         <button
                           type="button"
                           onClick={() => removeAdditionalCharge(index)}
@@ -1789,21 +2352,28 @@ function Index() {
                           <span className="font-medium text-foreground">Keterangan biaya</span>
                           <input
                             value={charge.description}
-                            onChange={(event) => updateAdditionalCharge(index, "description", event.target.value)}
+                            onChange={(event) =>
+                              updateAdditionalCharge(index, "description", event.target.value)
+                            }
                             placeholder="Contoh: Biaya antar-jemput bandara"
                             maxLength={120}
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
                         <label className="space-y-2 text-sm">
-                          <span className="font-medium text-foreground">Nominal (sekali bayar)</span>
+                          <span className="font-medium text-foreground">
+                            Nominal (sekali bayar)
+                          </span>
                           <input
-                            type="number"
-                            min={0}
-                            max={1_000_000_000}
-                            step={1}
-                            value={charge.amount}
-                            onChange={(event) => updateAdditionalCharge(index, "amount", event.target.value)}
+                            inputMode="numeric"
+                            value={formatRupiahInput(charge.amount)}
+                            onChange={(event) =>
+                              updateAdditionalCharge(
+                                index,
+                                "amount",
+                                formatRupiahInput(event.target.value),
+                              )
+                            }
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
@@ -1815,21 +2385,51 @@ function Index() {
                 <div className="mt-6 rounded-[24px] border border-border bg-amber-50 p-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-muted-foreground">Grand Total</div>
-                    <div className="text-2xl font-bold text-foreground">{formatRupiah(grandTotal(form.items, form.additional_charges ?? []))}</div>
+                    <div className="text-2xl font-bold text-foreground">
+                      {formatRupiah(grandTotal(form.items, form.additional_charges ?? []))}
+                    </div>
                   </div>
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <button type="button" onClick={() => setShowPreview(true)} className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Preview Invoice</button>
-                  <button type="button" onClick={saveInvoice} disabled={invoiceSaving} className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview(true)}
+                    className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
+                  >
+                    Preview Invoice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveInvoice}
+                    disabled={invoiceSaving}
+                    className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  >
                     {invoiceSaving ? "Menyimpan..." : "Simpan Invoice"}
                   </button>
-                  <button type="button" onClick={downloadPdf} className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground">Download PDF</button>
-                  <button type="button" onClick={printInvoice} className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground">Cetak Invoice</button>
-                  <button type="button" onClick={resetForm} className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground">Reset Form</button>
+                  <button
+                    type="button"
+                    onClick={downloadPdf}
+                    className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground"
+                  >
+                    Download PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={printInvoice}
+                    className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground"
+                  >
+                    Cetak Invoice
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground"
+                  >
+                    Reset Form
+                  </button>
                 </div>
               </div>
-
             </section>
           )}
 
@@ -1840,29 +2440,75 @@ function Index() {
                   <h2 className="text-xl font-bold text-foreground">Riwayat Invoice</h2>
                 </div>
                 <div className="grid gap-3 md:grid-cols-3">
-                  <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari nomor / klien" className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm" />
-                  <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm" />
-                  <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm" />
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Cari nomor / klien"
+                    className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm"
+                  />
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(event) => setStartDate(event.target.value)}
+                    className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm"
+                  />
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(event) => setEndDate(event.target.value)}
+                    className="rounded-xl border border-input bg-background px-3 py-2.5 text-sm"
+                  />
                 </div>
               </div>
 
               <div className="space-y-3">
                 {filteredInvoices.length === 0 ? (
-                  <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">Tidak ada invoice yang cocok.</div>
+                  <div className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">
+                    Tidak ada invoice yang cocok.
+                  </div>
                 ) : (
                   filteredInvoices.map((invoice) => (
-                    <div key={invoice.id} className="flex flex-col gap-3 rounded-2xl border border-border p-4 md:flex-row md:items-center md:justify-between">
+                    <div
+                      key={invoice.id}
+                      className="flex flex-col gap-3 rounded-2xl border border-border p-4 md:flex-row md:items-center md:justify-between"
+                    >
                       <div>
-                        <div className="font-semibold text-foreground">{invoice.invoice_number}</div>
-                        <div className="text-sm text-muted-foreground">{invoice.client_name} • {formatDateID(invoice.invoice_date, true)}</div>
+                        <div className="font-semibold text-foreground">
+                          {invoice.invoice_number}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {invoice.client_name} • {formatDateID(invoice.invoice_date, true)}
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right">
-                          <div className="font-semibold text-foreground">{formatRupiah(grandTotal(invoice.items, invoice.additional_charges ?? []))}</div>
+                          <div className="font-semibold text-foreground">
+                            {formatRupiah(
+                              grandTotal(invoice.items, invoice.additional_charges ?? []),
+                            )}
+                          </div>
                         </div>
-                        <button type="button" onClick={() => loadEditInvoice(invoice)} className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground">Edit</button>
-                        <button type="button" onClick={() => duplicateInvoice(invoice)} className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground">Duplikat</button>
-                        <button type="button" onClick={() => deleteInvoice(invoice.id)} className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white">Hapus</button>
+                        <button
+                          type="button"
+                          onClick={() => loadEditInvoice(invoice)}
+                          className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => duplicateInvoice(invoice)}
+                          className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground"
+                        >
+                          Duplikat
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteInvoice(invoice.id)}
+                          className="rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white"
+                        >
+                          Hapus
+                        </button>
                       </div>
                     </div>
                   ))
@@ -1880,24 +2526,67 @@ function Index() {
                     <div key={client.id} className="rounded-2xl border border-border p-4">
                       <div className="font-semibold text-foreground">{client.company}</div>
                       <div className="text-sm text-muted-foreground">PIC: {client.pic}</div>
-                      <div className="text-sm text-muted-foreground">{client.phone} • {client.email}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {client.phone} • {client.email}
+                      </div>
                       <div className="text-sm text-muted-foreground">{client.address}</div>
                     </div>
                   ))}
                 </div>
                 <div className="space-y-3">
-                  <input value={clientForm.company} onChange={(event) => setClientForm((current) => ({ ...current, company: event.target.value }))} placeholder="Nama perusahaan" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <input value={clientForm.pic} onChange={(event) => setClientForm((current) => ({ ...current, pic: event.target.value }))} placeholder="Nama PIC" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <input value={clientForm.phone} onChange={(event) => setClientForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Nomor telepon" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <input value={clientForm.email} onChange={(event) => setClientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <textarea value={clientForm.address} onChange={(event) => setClientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Alamat" className="min-h-[120px] w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <button type="button" onClick={addClient} className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Simpan Klien</button>
+                  <input
+                    value={clientForm.company}
+                    onChange={(event) =>
+                      setClientForm((current) => ({ ...current, company: event.target.value }))
+                    }
+                    placeholder="Nama perusahaan"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <input
+                    value={clientForm.pic}
+                    onChange={(event) =>
+                      setClientForm((current) => ({ ...current, pic: event.target.value }))
+                    }
+                    placeholder="Nama PIC"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <input
+                    value={clientForm.phone}
+                    onChange={(event) =>
+                      setClientForm((current) => ({ ...current, phone: event.target.value }))
+                    }
+                    placeholder="Nomor telepon"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <input
+                    value={clientForm.email}
+                    onChange={(event) =>
+                      setClientForm((current) => ({ ...current, email: event.target.value }))
+                    }
+                    placeholder="Email"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <textarea
+                    value={clientForm.address}
+                    onChange={(event) =>
+                      setClientForm((current) => ({ ...current, address: event.target.value }))
+                    }
+                    placeholder="Alamat"
+                    className="min-h-[120px] w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <button
+                    type="button"
+                    onClick={addClient}
+                    className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
+                  >
+                    Simpan Klien
+                  </button>
                 </div>
               </div>
             </section>
           )}
 
-          {activeTab === "vehicles" && (
+          {activeTab === "legacyVehicles" && (
             <section className="rounded-[28px] border border-border bg-white p-5 shadow-card">
               <h2 className="text-xl font-bold text-foreground">Data Kendaraan</h2>
               <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -1906,15 +2595,48 @@ function Index() {
                     <div key={vehicle.id} className="rounded-2xl border border-border p-4">
                       <div className="font-semibold text-foreground">{vehicle.type}</div>
                       <div className="text-sm text-muted-foreground">{vehicle.plateNumber}</div>
-                      <div className="text-sm text-muted-foreground">Harga default: {formatRupiah(vehicle.defaultPrice)}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Harga default: {formatRupiah(vehicle.defaultPrice)}
+                      </div>
                     </div>
                   ))}
                 </div>
                 <div className="space-y-3">
-                  <input value={vehicleForm.type} onChange={(event) => setVehicleForm((current) => ({ ...current, type: event.target.value }))} placeholder="Jenis mobil" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <input value={vehicleForm.plateNumber} onChange={(event) => setVehicleForm((current) => ({ ...current, plateNumber: event.target.value }))} placeholder="Nomor polisi" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <input value={vehicleForm.defaultPrice} onChange={(event) => setVehicleForm((current) => ({ ...current, defaultPrice: event.target.value }))} placeholder="Harga default per hari" className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
-                  <button type="button" onClick={addVehicle} className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Simpan Kendaraan</button>
+                  <input
+                    value={vehicleForm.type}
+                    onChange={(event) =>
+                      setVehicleForm((current) => ({ ...current, type: event.target.value }))
+                    }
+                    placeholder="Jenis mobil"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <input
+                    value={vehicleForm.plateNumber}
+                    onChange={(event) =>
+                      setVehicleForm((current) => ({ ...current, plateNumber: event.target.value }))
+                    }
+                    placeholder="Nomor polisi"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <input
+                    inputMode="numeric"
+                    value={formatRupiahInput(vehicleForm.defaultPrice)}
+                    onChange={(event) =>
+                      setVehicleForm((current) => ({
+                        ...current,
+                        defaultPrice: formatRupiahInput(event.target.value),
+                      }))
+                    }
+                    placeholder="Harga default per hari"
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
+                  <button
+                    type="button"
+                    onClick={addVehicle}
+                    className="w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white"
+                  >
+                    Simpan Kendaraan
+                  </button>
                 </div>
               </div>
             </section>
@@ -1929,31 +2651,85 @@ function Index() {
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2 text-sm">
                   <span className="font-medium text-foreground">Nama perusahaan</span>
-                  <input value={companySettings.company_name} onChange={(event) => setCompanySettings((current) => ({ ...current, company_name: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <input
+                    value={companySettings.company_name}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({
+                        ...current,
+                        company_name: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
                 <label className="space-y-2 text-sm">
                   <span className="font-medium text-foreground">Kota default</span>
-                  <input value={companySettings.default_city} onChange={(event) => setCompanySettings((current) => ({ ...current, default_city: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <input
+                    value={companySettings.default_city}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({
+                        ...current,
+                        default_city: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
                 <label className="space-y-2 text-sm md:col-span-2">
                   <span className="font-medium text-foreground">Alamat</span>
-                  <textarea value={companySettings.address} onChange={(event) => setCompanySettings((current) => ({ ...current, address: event.target.value }))} className="min-h-[120px] w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <textarea
+                    value={companySettings.address}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({ ...current, address: event.target.value }))
+                    }
+                    className="min-h-[120px] w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
                 <label className="space-y-2 text-sm">
                   <span className="font-medium text-foreground">Telepon / WhatsApp</span>
-                  <input value={companySettings.phone} onChange={(event) => setCompanySettings((current) => ({ ...current, phone: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <input
+                    value={companySettings.phone}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({ ...current, phone: event.target.value }))
+                    }
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
                 <label className="space-y-2 text-sm">
                   <span className="font-medium text-foreground">Email</span>
-                  <input value={companySettings.email} onChange={(event) => setCompanySettings((current) => ({ ...current, email: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <input
+                    value={companySettings.email}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({ ...current, email: event.target.value }))
+                    }
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
                 <label className="space-y-2 text-sm">
                   <span className="font-medium text-foreground">Nama penandatangan</span>
-                  <input value={companySettings.signer_name} onChange={(event) => setCompanySettings((current) => ({ ...current, signer_name: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <input
+                    value={companySettings.signer_name}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({
+                        ...current,
+                        signer_name: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
                 <label className="space-y-2 text-sm">
                   <span className="font-medium text-foreground">Jabatan penandatangan</span>
-                  <input value={companySettings.signer_title} onChange={(event) => setCompanySettings((current) => ({ ...current, signer_title: event.target.value }))} className="w-full rounded-xl border border-input bg-background px-3 py-2.5" />
+                  <input
+                    value={companySettings.signer_title}
+                    onChange={(event) =>
+                      setCompanySettings((current) => ({
+                        ...current,
+                        signer_title: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  />
                 </label>
               </div>
 
@@ -1962,13 +2738,60 @@ function Index() {
                 <div className="space-y-3">
                   {companySettings.bank_accounts.map((account, index) => (
                     <div key={`${account.bank}-${index}`} className="grid gap-2 md:grid-cols-3">
-                      <input value={account.bank} onChange={(event) => setCompanySettings((current) => ({ ...current, bank_accounts: current.bank_accounts.map((item, itemIndex) => itemIndex === index ? { ...item, bank: event.target.value } : item) }))} className="rounded-xl border border-input bg-background px-3 py-2.5" />
-                      <input value={account.name} onChange={(event) => setCompanySettings((current) => ({ ...current, bank_accounts: current.bank_accounts.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} className="rounded-xl border border-input bg-background px-3 py-2.5" />
-                      <input value={account.number} onChange={(event) => setCompanySettings((current) => ({ ...current, bank_accounts: current.bank_accounts.map((item, itemIndex) => itemIndex === index ? { ...item, number: event.target.value } : item) }))} className="rounded-xl border border-input bg-background px-3 py-2.5" />
+                      <input
+                        value={account.bank}
+                        onChange={(event) =>
+                          setCompanySettings((current) => ({
+                            ...current,
+                            bank_accounts: current.bank_accounts.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, bank: event.target.value } : item,
+                            ),
+                          }))
+                        }
+                        className="rounded-xl border border-input bg-background px-3 py-2.5"
+                      />
+                      <input
+                        value={account.name}
+                        onChange={(event) =>
+                          setCompanySettings((current) => ({
+                            ...current,
+                            bank_accounts: current.bank_accounts.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, name: event.target.value } : item,
+                            ),
+                          }))
+                        }
+                        className="rounded-xl border border-input bg-background px-3 py-2.5"
+                      />
+                      <input
+                        value={account.number}
+                        onChange={(event) =>
+                          setCompanySettings((current) => ({
+                            ...current,
+                            bank_accounts: current.bank_accounts.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, number: event.target.value } : item,
+                            ),
+                          }))
+                        }
+                        className="rounded-xl border border-input bg-background px-3 py-2.5"
+                      />
                     </div>
                   ))}
                 </div>
-                <button type="button" onClick={() => setCompanySettings((current) => ({ ...current, bank_accounts: [...current.bank_accounts, { bank: "Bank Baru", name: "Nama", number: "000000" }] }))} className="mt-3 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold text-foreground">+ Tambah rekening</button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCompanySettings((current) => ({
+                      ...current,
+                      bank_accounts: [
+                        ...current.bank_accounts,
+                        { bank: "Bank Baru", name: "Nama", number: "000000" },
+                      ],
+                    }))
+                  }
+                  className="mt-3 rounded-xl border border-border bg-white px-4 py-2 text-sm font-semibold text-foreground"
+                >
+                  + Tambah rekening
+                </button>
               </div>
               {role === "admin" && (
                 <button
@@ -1984,10 +2807,19 @@ function Index() {
           )}
 
           {showPreview && (
-            <section id="invoice-print-root" className="rounded-[28px] border border-border bg-white p-5 shadow-card">
+            <section
+              id="invoice-print-root"
+              className="rounded-[28px] border border-border bg-white p-5 shadow-card"
+            >
               <div className="invoice-preview-toolbar mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-bold text-foreground">Preview Invoice</h2>
-                <button type="button" onClick={() => setShowPreview(false)} className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium text-foreground">Tutup</button>
+                <button
+                  type="button"
+                  onClick={() => setShowPreview(false)}
+                  className="rounded-xl border border-border bg-white px-3 py-2 text-sm font-medium text-foreground"
+                >
+                  Tutup
+                </button>
               </div>
               <InvoicePreview invoice={form} company={companySettings} />
             </section>

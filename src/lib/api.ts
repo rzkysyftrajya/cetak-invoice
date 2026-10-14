@@ -1,5 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { BankAccount, CompanySettings, InvoiceInput } from "./invoice";
+import type {
+  FleetBookingStatus,
+  FleetPaymentStatus,
+  FleetRentalMode,
+  FleetVehicle,
+} from "./fleet";
 import { DEFAULT_LOGO, DEFAULT_SIGNATURE, newAdditionalCharge, newItem } from "./invoice";
 
 /** Turn backend errors into safe Indonesian messages. */
@@ -22,18 +28,30 @@ export function friendlyError(err: unknown): string {
     return "Terlalu banyak permintaan email verifikasi. Tunggu beberapa menit lalu coba lagi.";
   if (/invalid api key|invalid jwt/i.test(msg) || e?.status === 401)
     return "Kunci Supabase tidak cocok atau sudah tidak berlaku. Periksa URL dan publishable key pada environment aplikasi.";
-  if (/PGRST202|PGRST205|42P01|42883|schema cache|could not find the function|relation .* does not exist/i.test(msg))
+  if (
+    /PGRST202|PGRST205|42P01|42883|schema cache|could not find the function|relation .* does not exist/i.test(
+      msg,
+    )
+  )
     return "Struktur database Supabase belum lengkap. Jalankan ulang migrasi database yang disediakan proyek.";
   if (/rental_bookings_one_running_per_vehicle_idx/i.test(msg))
     return "Mobil ini sudah memiliki rental berstatus Berjalan. Selesaikan rental aktifnya terlebih dahulu.";
-  if (e?.code === "23505" || /duplicate key/i.test(msg)) return "Nomor sudah digunakan. Gunakan nomor lain.";
+  if (e?.code === "23505" || /duplicate key/i.test(msg))
+    return "Nomor sudah digunakan. Gunakan nomor lain.";
   if (/Akses ditolak|permission denied|row-level security/i.test(msg))
     return "Anda tidak memiliki akses untuk tindakan ini.";
   if (/Nomor invoice final/i.test(msg)) return "Nomor invoice final tidak dapat diubah.";
   if (/Keterangan biaya|Biaya tidak valid/i.test(msg)) return msg;
-  if (/Jumlah hari|Harga tidak valid|Minimal satu baris|tidak ditemukan|rental|mobil|tanggal|Nominal|Nama pelanggan|Pilih mobil/i.test(msg)) return msg;
-  if (/Failed to fetch|NetworkError/i.test(msg)) return "Koneksi bermasalah. Periksa internet Anda.";
-  if (!msg) return "Supabase tidak mengembalikan pesan kesalahan. Periksa koneksi dan konfigurasi aplikasi.";
+  if (
+    /Jumlah hari|Harga tidak valid|Minimal satu baris|tidak ditemukan|rental|mobil|tanggal|Nominal|Nama pelanggan|Pilih mobil/i.test(
+      msg,
+    )
+  )
+    return msg;
+  if (/Failed to fetch|NetworkError/i.test(msg))
+    return "Koneksi bermasalah. Periksa internet Anda.";
+  if (!msg)
+    return "Supabase tidak mengembalikan pesan kesalahan. Periksa koneksi dan konfigurasi aplikasi.";
   return "Terjadi kesalahan. Silakan coba lagi.";
 }
 
@@ -43,7 +61,11 @@ function throwIf(error: unknown) {
 
 // ---------- Settings ----------
 export async function getSettings(): Promise<CompanySettings> {
-  const { data, error } = await supabase.from("company_settings").select("*").eq("id", 1).maybeSingle();
+  const { data, error } = await supabase
+    .from("company_settings")
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
   throwIf(error);
   if (!data) throw new Error("Pengaturan perusahaan belum tersedia");
   return { ...data, bank_accounts: (data.bank_accounts as unknown as BankAccount[]) ?? [] };
@@ -60,20 +82,27 @@ export async function updateSettings(s: Partial<CompanySettings>) {
 export async function uploadBrandAsset(kind: "logo" | "signature", file: File): Promise<string> {
   const ext = file.name.split(".").pop()?.toLowerCase() || "png";
   const path = `${kind}-${Date.now()}.${ext}`;
-  const { error } = await supabase.storage.from("brand-assets").upload(path, file, { upsert: true, contentType: file.type });
+  const { error } = await supabase.storage
+    .from("brand-assets")
+    .upload(path, file, { upsert: true, contentType: file.type });
   throwIf(error);
   return path;
 }
 
 /** Resolve logo/signature to absolute URLs usable by the PDF engine. */
-export async function resolveBrandUrls(s: CompanySettings): Promise<{ logo: string; signature: string }> {
+export async function resolveBrandUrls(
+  s: CompanySettings,
+): Promise<{ logo: string; signature: string }> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const sign = async (path: string | null, fallback: string) => {
     if (!path) return origin + fallback;
     const { data } = await supabase.storage.from("brand-assets").createSignedUrl(path, 60 * 60);
     return data?.signedUrl ?? origin + fallback;
   };
-  const [logo, signature] = await Promise.all([sign(s.logo_path, DEFAULT_LOGO), sign(s.signature_path, DEFAULT_SIGNATURE)]);
+  const [logo, signature] = await Promise.all([
+    sign(s.logo_path, DEFAULT_LOGO),
+    sign(s.signature_path, DEFAULT_SIGNATURE),
+  ]);
   return { logo, signature };
 }
 
@@ -87,7 +116,10 @@ export type Client = {
   address: string | null;
 };
 export async function listClients(): Promise<Client[]> {
-  const { data, error } = await supabase.from("clients").select("id,company_name,pic_name,phone,email,address").order("company_name");
+  const { data, error } = await supabase
+    .from("clients")
+    .select("id,company_name,pic_name,phone,email,address")
+    .order("company_name");
   throwIf(error);
   return data ?? [];
 }
@@ -106,13 +138,20 @@ export async function deleteClient(id: string) {
 }
 
 // ---------- Vehicles ----------
-export type Vehicle = { id: string; car_type: string; plate_number: string; default_price: number | null };
+export type Vehicle = FleetVehicle;
 export async function listVehicles(): Promise<Vehicle[]> {
-  const { data, error } = await supabase.from("vehicles").select("id,car_type,plate_number,default_price").order("car_type");
+  const { data, error } = await supabase
+    .from("vehicles")
+    .select(
+      "id,car_type,plate_number,brand,model,year,color,transmission,capacity,status,current_km,tax_date,stnk_date,insurance_date,default_price,notes,created_at,updated_at",
+    )
+    .order("car_type");
   throwIf(error);
   return data ?? [];
 }
-export async function saveVehicle(v: Omit<Vehicle, "id"> & { id?: string }) {
+export type VehicleInput = Pick<Vehicle, "car_type" | "plate_number"> &
+  Partial<Omit<Vehicle, "id" | "car_type" | "plate_number">> & { id?: string };
+export async function saveVehicle(v: VehicleInput) {
   const { id, ...rest } = v;
   const { data, error } = id
     ? await supabase.from("vehicles").update(rest).eq("id", id).select("id").single()
@@ -127,37 +166,38 @@ export async function deleteVehicle(id: string) {
 }
 
 // ---------- Rental bookings ----------
-export type RentalBookingStatus = "Booking" | "Berjalan" | "Selesai" | "Dibatalkan" | "No Show";
-export type RentalPaymentStatus = "Belum Bayar" | "DP" | "Lunas" | "Dibatalkan";
-export type RentalBooking = {
-  id: string;
-  vehicle_id: string | null;
-  car_type: string;
-  plate_number: string;
-  customer_name: string;
-  whatsapp: string | null;
-  start_date: string;
-  end_date: string;
-  service: string;
-  route: string | null;
-  daily_rate: number;
-  deposit: number;
-  paid: number;
-  payment_status: RentalPaymentStatus;
-  booking_status: RentalBookingStatus;
-  notes: string | null;
+export type RentalBookingStatus = FleetBookingStatus;
+export type RentalPaymentStatus = FleetPaymentStatus;
+export type RentalBooking = import("./fleet").FleetRental & {
   created_at: string;
   updated_at: string;
 };
 
-export type RentalBookingInput = Omit<RentalBooking, "id" | "created_at" | "created_by" | "updated_at"> & {
+export type RentalBookingInput = Omit<
+  RentalBooking,
+  | "id"
+  | "created_at"
+  | "updated_at"
+  | "rental_mode"
+  | "start_time"
+  | "end_time"
+  | "driver_cost"
+  | "normal_rate"
+> & {
   id?: string;
+  normal_rate: number;
+  rental_mode?: FleetRentalMode;
+  start_time?: string | null;
+  end_time?: string | null;
+  driver_cost?: number;
 };
 
 export async function listRentalBookings(): Promise<RentalBooking[]> {
   const { data, error } = await supabase
     .from("rental_bookings")
-    .select("*")
+    .select(
+      "id,vehicle_id,city,car_type,plate_number,customer_name,whatsapp,start_date,end_date,start_time,end_time,rental_mode,service,route,normal_rate,daily_rate,deposit,paid,driver_cost,payment_status,booking_status,notes,created_at,updated_at",
+    )
     .order("start_date", { ascending: false })
     .order("created_at", { ascending: false });
   throwIf(error);
@@ -186,7 +226,9 @@ export type InvoiceRow = {
   created_at: string;
 };
 
-export async function listInvoices(opts: { search?: string; from?: string; to?: string; limit?: number } = {}): Promise<InvoiceRow[]> {
+export async function listInvoices(
+  opts: { search?: string; from?: string; to?: string; limit?: number } = {},
+): Promise<InvoiceRow[]> {
   let q = supabase
     .from("invoices")
     .select("id,invoice_number,invoice_date,client_name,pic_name,status,grand_total,created_at")
@@ -366,7 +408,12 @@ export async function getMyRole(): Promise<"admin" | "staff" | null> {
   return null;
 }
 
-export type UserRow = { id: string; email: string | null; full_name: string | null; role: "admin" | "staff" | null };
+export type UserRow = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: "admin" | "staff" | null;
+};
 export async function listUsers(): Promise<UserRow[]> {
   const [{ data: profiles, error }, { data: roles }] = await Promise.all([
     supabase.from("profiles").select("id,email,full_name").order("created_at"),

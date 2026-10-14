@@ -318,7 +318,7 @@ This project was built with [Lovable](https://lovable.dev).
 ## Menghubungkan aplikasi ke Supabase
 
 1. Pastikan variabel `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_URL`, dan `SUPABASE_PUBLISHABLE_KEY` sudah diatur pada environment proyek. Jangan bagikan atau commit file `.env`.
-2. Jalankan migrasi `drizzle/migrations/0000_migration.sql`, `drizzle/migrations/0001_migration.sql`, dan `drizzle/migrations/0002_invoice_additional_charges.sql` secara berurutan pada proyek Supabase yang sama.
+2. Jalankan migrasi `drizzle/migrations/0000_migration.sql`, `drizzle/migrations/0001_migration.sql`, `drizzle/migrations/0002_invoice_additional_charges.sql`, dan `drizzle/migrations/0003_rental_bookings.sql` secara berurutan pada proyek Supabase yang sama.
 3. Buka aplikasi dan pilih **Daftar sebagai admin pertama** untuk akun admin awal. Jika autentikasi Supabase mewajibkan verifikasi email, verifikasi email lalu masuk.
 4. Di perangkat lain, buka alamat aplikasi yang sudah di-deploy dan masuk menggunakan akun yang sama. Invoice, klien, kendaraan, dan pengaturan perusahaan yang disimpan dari aplikasi akan dibaca dari Supabase.
 5. Invoice lama yang hanya tersimpan di browser tidak otomatis berpindah. Pada browser asal, masuk ke aplikasi dan pilih **Impor invoice lokal**. Data browser lama tidak dihapus; nomor invoice yang sudah ada di Supabase tidak dibuat ulang.
@@ -331,6 +331,18 @@ select id, 'staff' from auth.users where email = '<EMAIL_AKUN>';
 ```
 
 Jalankan perintah tersebut setelah mengganti `<EMAIL_AKUN>` dengan email akun yang sesuai. Jangan menaruh service-role key di browser atau environment `VITE_*`.
+
+## Catatan order rental luar Medan
+
+Dashboard manajemen armada sekarang menjadi bagian dari aplikasi React/TanStack dan memakai tabel `vehicles` serta `rental_bookings` di Supabase; aplikasi tidak lagi memanggil `google.script.run`.
+
+1. Setelah migrasi dasar Supabase selesai, jalankan `supabase/fleet-management.sql` melalui Supabase SQL Editor.
+2. Jalankan `supabase/rental-pricing.sql` untuk menambahkan kolom harga normal per hari.
+3. Untuk memulai dengan catatan rental dan armada kosong, jalankan `supabase/clear-legacy-rental-orders.sql`. Skrip ini menghapus catatan rental yang belum memiliki kota atau berlabel Medan, lalu menghapus semua unit kendaraan. Rental lain dan invoice tetap tersimpan; referensi unit pada rental/invoice akan dikosongkan otomatis, tetapi deskripsi, harga, dan rincian invoice tidak dihapus. Klien dan pengaturan perusahaan tidak diubah.
+4. Deploy ulang aplikasi React/TanStack. Form **Rental** meminta kota tujuan, menyarankan Surabaya, Jakarta, Semarang, Makassar, Batam, dan Yogyakarta, serta mengizinkan kota lain. Kota Medan ditolak untuk order baru.
+5. Setiap catatan rental meminta **harga normal per hari** dan **harga jual ke tamu per hari**. Keuntungan bersih dihitung dari `(harga jual − harga normal) × jumlah hari − biaya operasional driver`. Transaksi lama tidak memiliki harga normal; lengkapi data tersebut agar masuk dalam perhitungan keuntungan bersih.
+6. Dashboard menggabungkan order dari semua kota. Di **Pendapatan / Kota**, laporan menampilkan ringkasan pendapatan per kota dan dapat difilter ke kota tertentu.
+7. Data yang sebelumnya hanya berada di Google Sheets tidak disalin otomatis. Jika masih diperlukan, ekspor dan impor hanya catatan rental yang ingin dipertahankan sebelum menjalankan skrip pembersihan.
 
 ## Build with Lovable
 

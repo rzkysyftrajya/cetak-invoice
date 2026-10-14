@@ -63,6 +63,11 @@ export function parseRupiah(input: string): number {
   return digits ? Number(digits) : 0;
 }
 
+export function formatRupiahInput(input: string | number): string {
+  const digits = String(input).replace(/[^\d]/g, "");
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+
 function parseISODate(iso: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
   if (!m) return null;

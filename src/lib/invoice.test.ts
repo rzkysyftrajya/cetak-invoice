@@ -3,6 +3,7 @@ import {
   addDaysToISODate,
   formatDateID,
   formatDateRangeID,
+  formatRupiahInput,
   formatRupiah,
   grandTotal,
   inclusiveDaysBetween,
@@ -34,6 +35,12 @@ describe("invoice rules", () => {
   it("formats Rupiah as Rp1.350.000", () => {
     expect(formatRupiah(1350000)).toBe("Rp1.350.000");
     expect(parseRupiah("Rp1.350.000")).toBe(1350000);
+  });
+  it("formats amounts as the user types without changing their numeric value", () => {
+    expect(formatRupiahInput("350000")).toBe("350.000");
+    expect(formatRupiahInput("350.000")).toBe("350.000");
+    expect(parseRupiah(formatRupiahInput("350000"))).toBe(350000);
+    expect(formatRupiahInput("")).toBe("");
   });
   it("formats Indonesian dates", () => {
     expect(formatDateID("2026-10-09")).toBe("9 Okt 2026");
