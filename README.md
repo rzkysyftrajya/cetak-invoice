@@ -362,3 +362,14 @@ cd <repository-name>
 bun install --frozen-lockfile
 bun run dev
 ```
+
+## Instalasi di Android dan iPhone
+
+Aplikasi menyediakan web app manifest dan ikon instalasi Android, serta ikon dan metadata
+layar utama untuk iPhone. Deploy aplikasi ke alamat HTTPS agar dapat ditambahkan ke layar
+utama perangkat.
+
+- **Android:** buka alamat aplikasi di Chrome, lalu pilih **Install app** atau **Tambahkan
+  ke layar utama** dari menu browser.
+- **iPhone:** buka alamat aplikasi di Safari, ketuk **Bagikan**, lalu pilih **Add to Home
+  Screen / Tambahkan ke Layar Utama**.

@@ -79,10 +79,20 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Vicky Rental Nusantara Invoice" },
-      { name: "description", content: "Aplikasi invoice dan manajemen rental mobil PT Vicky Rental Nusantara." },
+      {
+        name: "description",
+        content: "Aplikasi invoice dan manajemen rental mobil PT Vicky Rental Nusantara.",
+      },
       { name: "author", content: "Vicky Rental Nusantara" },
+      { name: "theme-color", content: "#0b1f44" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-title", content: "VRN Invoice" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       { property: "og:title", content: "Vicky Rental Nusantara Invoice" },
-      { property: "og:description", content: "Aplikasi invoice dan manajemen rental mobil PT Vicky Rental Nusantara." },
+      {
+        property: "og:description",
+        content: "Aplikasi invoice dan manajemen rental mobil PT Vicky Rental Nusantara.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@VRN" },
@@ -92,7 +102,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
+      { rel: "manifest", href: "/site.webmanifest" },
+      { rel: "icon", href: "/favicon-32x32.png", type: "image/png", sizes: "32x32" },
+      { rel: "icon", href: "/favicon-16x16.png", type: "image/png", sizes: "16x16" },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png", sizes: "180x180" },
     ],
   }),
   shellComponent: RootShell,
@@ -103,7 +117,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="id">
       <head>
         <HeadContent />
       </head>
