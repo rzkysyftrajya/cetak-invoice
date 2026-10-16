@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../integrations/supabase/client";
+import { usernameToAuthEmail } from "../lib/auth";
+import { InvoiceTemplatePDF, InvoiceTemplatePreview } from "../components/invoice-templates";
 import {
   Sheet,
   SheetContent,
@@ -33,11 +35,13 @@ import {
   listRentalBookings,
   listVehicles,
   nextInvoiceNumber,
+  resolveBrandUrls,
   saveClient,
   saveRentalBooking,
   saveInvoice as saveCloudInvoice,
   saveVehicle,
   updateSettings,
+  uploadBrandAsset,
   type RentalBooking,
   type RentalBookingInput,
   type RentalBookingStatus,
@@ -167,6 +171,7 @@ const defaultCompanySettings: CompanySettings = {
   default_city: "Jakarta",
   logo_path: DEFAULT_LOGO,
   signature_path: DEFAULT_SIGNATURE,
+  invoice_template: "vicky",
 };
 
 const sampleClientIds = new Set(["client-1", "client-2"]);
@@ -217,20 +222,26 @@ function emitDownload(filename: string, blob: Blob) {
 function InvoicePDFDocument({
   invoice,
   company,
+  logo,
+  signature,
 }: {
   invoice: InvoiceInput;
   company: CompanySettings;
+  logo: string | null;
+  signature: string | null;
 }) {
+  if (company.invoice_template !== "vicky")
+    return (
+      <InvoiceTemplatePDF invoice={invoice} company={company} logo={logo} signature={signature} />
+    );
   const additionalCharges = invoice.additional_charges ?? [];
   const total = grandTotal(invoice.items, additionalCharges);
-  const logo = company.logo_path || DEFAULT_LOGO;
-  const signature = company.signature_path || DEFAULT_SIGNATURE;
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
         <View style={styles.headerRow}>
-          <Image src={logo} style={styles.logo} />
+          {logo ? <Image src={logo} style={styles.logo} /> : null}
           <View style={styles.companyBlock}>
             <Text style={styles.companyName}>Invoice {company.company_name}</Text>
             <Text style={styles.muted}>{company.address}</Text>
@@ -336,10 +347,10 @@ function InvoicePDFDocument({
             ))}
           </View>
           <View style={styles.signatureBox}>
-            <Image src={logo} style={styles.signatureWatermark} />
+            {logo ? <Image src={logo} style={styles.signatureWatermark} /> : null}
             <Text style={styles.signText}>Hormat Kami</Text>
             <Text style={styles.signCompany}>{company.company_name}</Text>
-            <Image src={signature} style={styles.signature} />
+            {signature ? <Image src={signature} style={styles.signature} /> : null}
             <Text style={styles.signName}>{company.signer_name}</Text>
             <Text style={styles.signTitle}>{company.signer_title}</Text>
           </View>
@@ -350,18 +361,33 @@ function InvoicePDFDocument({
   );
 }
 
-function InvoicePreview({ invoice, company }: { invoice: InvoiceInput; company: CompanySettings }) {
+function InvoicePreview({
+  invoice,
+  company,
+  logo,
+  signature,
+}: {
+  invoice: InvoiceInput;
+  company: CompanySettings;
+  logo: string | null;
+  signature: string | null;
+}) {
+  if (company.invoice_template !== "vicky")
+    return (
+      <InvoiceTemplatePreview
+        invoice={invoice}
+        company={company}
+        logo={logo}
+        signature={signature}
+      />
+    );
   const additionalCharges = invoice.additional_charges ?? [];
   const total = grandTotal(invoice.items, additionalCharges);
 
   return (
     <div className="invoice-sheet font-invoice">
       <header className="invoice-header">
-        <img
-          src={company.logo_path || DEFAULT_LOGO}
-          alt="Logo perusahaan"
-          className="invoice-logo"
-        />
+        <img src={logo || DEFAULT_LOGO} alt="Logo perusahaan" className="invoice-logo" />
         <div className="invoice-company">
           <h1>Invoice {company.company_name}</h1>
           <p>{company.address}</p>
@@ -468,15 +494,12 @@ function InvoicePreview({ invoice, company }: { invoice: InvoiceInput; company: 
           ))}
         </div>
         <div className="invoice-signature">
-          <img
-            className="invoice-signature-watermark"
-            src={company.logo_path || DEFAULT_LOGO}
-            alt=""
-            aria-hidden="true"
-          />
+          {logo ? (
+            <img className="invoice-signature-watermark" src={logo} alt="" aria-hidden="true" />
+          ) : null}
           <div>Hormat Kami</div>
           <strong>{company.company_name}</strong>
-          <img src={company.signature_path || DEFAULT_SIGNATURE} alt="Tanda tangan" />
+          {signature ? <img src={signature} alt="Tanda tangan" /> : null}
           <strong>{company.signer_name}</strong>
           <span>{company.signer_title}</span>
         </div>
@@ -494,10 +517,18 @@ function Index() {
   const [cloudLoading, setCloudLoading] = useState(false);
   const [authError, setAuthError] = useState("");
   const [cloudError, setCloudError] = useState("");
-  const [authForm, setAuthForm] = useState({ email: "", password: "" });
+  const [authForm, setAuthForm] = useState({ username: "", password: "" });
   const [authPending, setAuthPending] = useState(false);
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [brandAssetSaving, setBrandAssetSaving] = useState(false);
+  const [brandAssetError, setBrandAssetError] = useState("");
+  const [brandAssets, setBrandAssets] = useState<{ logo: string | null; signature: string | null }>(
+    {
+      logo: DEFAULT_LOGO,
+      signature: DEFAULT_SIGNATURE,
+    },
+  );
   const [localImportCount, setLocalImportCount] = useState(0);
   const [importPending, setImportPending] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -628,6 +659,36 @@ function Index() {
       active = false;
     };
   }, [session?.user.id, reloadKey]);
+
+  useEffect(() => {
+    if (!session?.user.id) {
+      setBrandAssets({ logo: null, signature: null });
+      setBrandAssetError("");
+      return;
+    }
+
+    let active = true;
+    setBrandAssetError("");
+    void resolveBrandUrls({
+      invoice_template: companySettings.invoice_template,
+      logo_path: companySettings.logo_path,
+      signature_path: companySettings.signature_path,
+    })
+      .then((assets) => {
+        if (active) setBrandAssets(assets);
+      })
+      .catch((error: unknown) => {
+        if (active) setBrandAssetError(friendlyError(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    session?.user.id,
+    companySettings.invoice_template,
+    companySettings.logo_path,
+    companySettings.signature_path,
+  ]);
 
   useEffect(() => {
     if (!printWhenReady || !showPreview) return;
@@ -948,13 +1009,23 @@ function Index() {
       window.alert("Nomor invoice wajib diisi sebelum unduh PDF.");
       return;
     }
-    if (typeof globalThis.Buffer === "undefined") {
-      Object.defineProperty(globalThis, "Buffer", { configurable: true, value: Buffer });
+    try {
+      if (typeof globalThis.Buffer === "undefined") {
+        Object.defineProperty(globalThis, "Buffer", { configurable: true, value: Buffer });
+      }
+      const assets = await resolveBrandUrls(companySettings);
+      const blob = await pdf(
+        <InvoicePDFDocument
+          invoice={form}
+          company={companySettings}
+          logo={assets.logo}
+          signature={assets.signature}
+        />,
+      ).toBlob();
+      emitDownload(invoiceFilename(form.invoice_number, form.client_name), blob);
+    } catch (error) {
+      window.alert(friendlyError(error));
     }
-    const blob = await pdf(
-      <InvoicePDFDocument invoice={form} company={companySettings} />,
-    ).toBlob();
-    emitDownload(invoiceFilename(form.invoice_number, form.client_name), blob);
   }
 
   function printInvoice() {
@@ -1166,13 +1237,42 @@ function Index() {
     }
   }
 
+  async function uploadCompanyAsset(kind: "logo" | "signature", file: File | undefined) {
+    if (!file) return;
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      window.alert("Unggah logo atau tanda tangan dalam format PNG atau JPG.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      window.alert("Ukuran file logo atau tanda tangan maksimal 5 MB.");
+      return;
+    }
+    setBrandAssetSaving(true);
+    setBrandAssetError("");
+    try {
+      const path = await uploadBrandAsset(kind, file);
+      await updateSettings({
+        [kind === "logo" ? "logo_path" : "signature_path"]: path,
+      });
+      setCompanySettings((current) => ({
+        ...current,
+        [kind === "logo" ? "logo_path" : "signature_path"]: path,
+      }));
+      window.alert(`${kind === "logo" ? "Logo" : "Tanda tangan"} berhasil diunggah.`);
+    } catch (error) {
+      setBrandAssetError(friendlyError(error));
+    } finally {
+      setBrandAssetSaving(false);
+    }
+  }
+
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthError("");
     setAuthPending(true);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: authForm.email.trim(),
+        email: usernameToAuthEmail(authForm.username),
         password: authForm.password,
       });
       if (error) throw error;
@@ -1288,20 +1388,22 @@ function Index() {
         >
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-              Vicky Rental Nusantara
+              Invoice Rental Mobil
             </div>
             <h1 className="mt-2 text-2xl font-bold text-foreground">Masuk ke Invoice</h1>
           </div>
           <label className="block space-y-2 text-sm">
-            <span className="font-medium text-foreground">Email</span>
+            <span className="font-medium text-foreground">Username</span>
             <input
               required
-              type="email"
-              autoComplete="email"
-              value={authForm.email}
+              type="text"
+              autoComplete="username"
+              maxLength={32}
+              value={authForm.username}
               onChange={(event) =>
-                setAuthForm((current) => ({ ...current, email: event.target.value }))
+                setAuthForm((current) => ({ ...current, username: event.target.value }))
               }
+              placeholder="username perusahaan"
               className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
             />
           </label>
@@ -1404,16 +1506,18 @@ function Index() {
       <div className="mx-auto flex max-w-[1600px] gap-6 p-5 pb-28 lg:p-8">
         <aside className="hidden w-72 shrink-0 rounded-[28px] bg-slate-950 p-5 text-white lg:block">
           <div className="mb-8 flex items-center gap-3">
-            <img
-              src={companySettings.logo_path || DEFAULT_LOGO}
-              alt="logo"
-              className="h-12 w-12 rounded-xl object-contain"
-            />
+            {brandAssets.logo ? (
+              <img
+                src={brandAssets.logo}
+                alt={`Logo ${companySettings.company_name}`}
+                className="h-12 w-12 rounded-xl object-contain"
+              />
+            ) : null}
             <div>
               <div className="text-xs uppercase tracking-[0.2em] text-slate-300">
                 Manajemen Rental
               </div>
-              <div className="text-lg font-bold">VRN</div>
+              <div className="text-lg font-bold">{companySettings.company_name}</div>
             </div>
           </div>
           <nav className="space-y-2">
@@ -1437,11 +1541,13 @@ function Index() {
         <main className="flex-1 space-y-6">
           <div className="flex flex-col gap-3 rounded-[28px] border border-border bg-white p-5 shadow-card md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-4">
-              <img
-                src={companySettings.logo_path || DEFAULT_LOGO}
-                alt="Logo Vicky Rental Nusantara"
-                className="h-14 w-14 rounded-xl object-contain"
-              />
+              {brandAssets.logo ? (
+                <img
+                  src={brandAssets.logo}
+                  alt={`Logo ${companySettings.company_name}`}
+                  className="h-14 w-14 rounded-xl object-contain"
+                />
+              ) : null}
               <div>
                 <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   {companySettings.company_name}
@@ -2675,6 +2781,25 @@ function Index() {
                     className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
                   />
                 </label>
+                <label className="space-y-2 text-sm">
+                  <span className="font-medium text-foreground">Template invoice</span>
+                  <select
+                    value={companySettings.invoice_template}
+                    onChange={(event) => {
+                      const template = event.target.value;
+                      if (template !== "vicky" && template !== "boy" && template !== "toms") return;
+                      setCompanySettings((current) => ({
+                        ...current,
+                        invoice_template: template,
+                      }));
+                    }}
+                    className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                  >
+                    <option value="vicky">Vicky Rental — format invoice</option>
+                    <option value="boy">Boy Makmur — format faktur</option>
+                    <option value="toms">Toms Rent Car — format invoice</option>
+                  </select>
+                </label>
                 <label className="space-y-2 text-sm md:col-span-2">
                   <span className="font-medium text-foreground">Alamat</span>
                   <textarea
@@ -2731,6 +2856,68 @@ function Index() {
                     className="w-full rounded-xl border border-input bg-background px-3 py-2.5"
                   />
                 </label>
+              </div>
+
+              <div className="rounded-[24px] border border-border bg-muted p-4">
+                <h3 className="mb-3 text-lg font-bold text-foreground">Logo dan Tanda Tangan</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Logo perusahaan</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg"
+                      disabled={brandAssetSaving}
+                      onChange={(event) => {
+                        void uploadCompanyAsset("logo", event.target.files?.[0]);
+                        event.currentTarget.value = "";
+                      }}
+                      className="block w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
+                    {brandAssets.logo ? (
+                      <img
+                        src={brandAssets.logo}
+                        alt={`Logo ${companySettings.company_name}`}
+                        className="h-20 w-20 rounded-xl bg-white object-contain p-2"
+                      />
+                    ) : (
+                      <span className="block text-xs text-muted-foreground">
+                        Belum ada logo; unggah logo untuk ditampilkan pada invoice.
+                      </span>
+                    )}
+                  </label>
+                  <label className="space-y-2 text-sm">
+                    <span className="font-medium text-foreground">Tanda tangan</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg"
+                      disabled={brandAssetSaving}
+                      onChange={(event) => {
+                        void uploadCompanyAsset("signature", event.target.files?.[0]);
+                        event.currentTarget.value = "";
+                      }}
+                      className="block w-full rounded-xl border border-input bg-background px-3 py-2.5"
+                    />
+                    {brandAssets.signature ? (
+                      <img
+                        src={brandAssets.signature}
+                        alt="Tanda tangan perusahaan"
+                        className="h-20 max-w-full rounded-xl bg-white object-contain p-2"
+                      />
+                    ) : (
+                      <span className="block text-xs text-muted-foreground">
+                        Belum ada tanda tangan.
+                      </span>
+                    )}
+                  </label>
+                </div>
+                {brandAssetError ? (
+                  <p role="alert" className="mt-3 text-sm text-red-700">
+                    {brandAssetError}
+                  </p>
+                ) : null}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Perubahan logo dan tanda tangan disimpan otomatis setelah file berhasil diunggah.
+                </p>
               </div>
 
               <div className="rounded-[24px] border border-border bg-muted p-4">
@@ -2793,16 +2980,14 @@ function Index() {
                   + Tambah rekening
                 </button>
               </div>
-              {role === "admin" && (
-                <button
-                  type="button"
-                  onClick={saveCompanySettings}
-                  disabled={settingsSaving}
-                  className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                >
-                  {settingsSaving ? "Menyimpan..." : "Simpan Pengaturan"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={saveCompanySettings}
+                disabled={settingsSaving}
+                className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {settingsSaving ? "Menyimpan..." : "Simpan Pengaturan"}
+              </button>
             </section>
           )}
 
@@ -2821,7 +3006,12 @@ function Index() {
                   Tutup
                 </button>
               </div>
-              <InvoicePreview invoice={form} company={companySettings} />
+              <InvoicePreview
+                invoice={form}
+                company={companySettings}
+                logo={brandAssets.logo}
+                signature={brandAssets.signature}
+              />
             </section>
           )}
         </main>

@@ -15,9 +15,9 @@ export function friendlyError(err: unknown): string {
   if (err instanceof Error && !e?.message) return err.message;
   const msg = e?.message ?? "";
   if (/invalid login credentials/i.test(msg))
-    return "Email atau kata sandi salah, atau akun belum terdaftar. Periksa kembali atau pilih Daftar.";
+    return "Username atau kata sandi salah. Periksa kembali username dan kata sandi Anda.";
   if (/email not confirmed/i.test(msg))
-    return "Email belum diverifikasi. Buka tautan verifikasi yang dikirim Supabase ke email Anda.";
+    return "Akun belum dikonfirmasi di Supabase Authentication. Minta admin memeriksa status akun.";
   if (/user already registered|user_already_exists/i.test(msg))
     return "Email ini sudah terdaftar. Kembali ke halaman Masuk dan gunakan akun tersebut.";
   if (/password.*(least|minimum|characters)|weak password/i.test(msg))
@@ -61,10 +61,16 @@ function throwIf(error: unknown) {
 
 // ---------- Settings ----------
 export async function getSettings(): Promise<CompanySettings> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  throwIf(userError);
+  if (!user) throw new Error("Sesi login tidak ditemukan");
   const { data, error } = await supabase
     .from("company_settings")
     .select("*")
-    .eq("id", 1)
+    .eq("owner_id", user.id)
     .maybeSingle();
   throwIf(error);
   if (!data) throw new Error("Pengaturan perusahaan belum tersedia");
@@ -72,16 +78,28 @@ export async function getSettings(): Promise<CompanySettings> {
 }
 
 export async function updateSettings(s: Partial<CompanySettings>) {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  throwIf(userError);
+  if (!user) throw new Error("Sesi login tidak ditemukan");
   const { error } = await supabase
     .from("company_settings")
     .update({ ...s, bank_accounts: s.bank_accounts as never })
-    .eq("id", 1);
+    .eq("owner_id", user.id);
   throwIf(error);
 }
 
 export async function uploadBrandAsset(kind: "logo" | "signature", file: File): Promise<string> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  throwIf(userError);
+  if (!user) throw new Error("Sesi login tidak ditemukan");
   const ext = file.name.split(".").pop()?.toLowerCase() || "png";
-  const path = `${kind}-${Date.now()}.${ext}`;
+  const path = `${user.id}/${kind}-${Date.now()}.${ext}`;
   const { error } = await supabase.storage
     .from("brand-assets")
     .upload(path, file, { upsert: true, contentType: file.type });
@@ -91,17 +109,24 @@ export async function uploadBrandAsset(kind: "logo" | "signature", file: File): 
 
 /** Resolve logo/signature to absolute URLs usable by the PDF engine. */
 export async function resolveBrandUrls(
-  s: CompanySettings,
-): Promise<{ logo: string; signature: string }> {
+  s: Pick<CompanySettings, "invoice_template" | "logo_path" | "signature_path">,
+): Promise<{ logo: string | null; signature: string | null }> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const sign = async (path: string | null, fallback: string) => {
-    if (!path) return origin + fallback;
-    const { data } = await supabase.storage.from("brand-assets").createSignedUrl(path, 60 * 60);
-    return data?.signedUrl ?? origin + fallback;
+  const fallbackLogo = s.invoice_template === "vicky" ? origin + DEFAULT_LOGO : null;
+  const fallbackSignature = s.invoice_template === "vicky" ? origin + DEFAULT_SIGNATURE : null;
+  const resolve = async (path: string | null, fallback: string | null) => {
+    if (!path) return fallback;
+    if (/^(https?:|data:|\/)/i.test(path)) return path;
+    const { data, error } = await supabase.storage
+      .from("brand-assets")
+      .createSignedUrl(path, 60 * 60);
+    throwIf(error);
+    if (!data?.signedUrl) throw new Error("Aset brand tidak berhasil dibuka");
+    return data.signedUrl;
   };
   const [logo, signature] = await Promise.all([
-    sign(s.logo_path, DEFAULT_LOGO),
-    sign(s.signature_path, DEFAULT_SIGNATURE),
+    resolve(s.logo_path, fallbackLogo),
+    resolve(s.signature_path, fallbackSignature),
   ]);
   return { logo, signature };
 }

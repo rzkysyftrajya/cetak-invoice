@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export type BankAccount = { bank: string; name: string; number: string };
+export type InvoiceTemplate = "vicky" | "boy" | "toms";
 
 export type CompanySettings = {
   company_name: string;
@@ -11,6 +12,7 @@ export type CompanySettings = {
   signer_name: string;
   signer_title: string;
   default_city: string;
+  invoice_template: InvoiceTemplate;
   logo_path: string | null;
   signature_path: string | null;
 };
@@ -54,7 +56,9 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "
 export function formatRupiah(value: number): string {
   const n = Number.isFinite(value) ? Math.round(value) : 0;
   const sign = n < 0 ? "-" : "";
-  return `${sign}Rp${Math.abs(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
+  return `${sign}Rp${Math.abs(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
 }
 
 /** Parse "1.350.000" / "Rp1.350.000" → 1350000 */
@@ -108,8 +112,7 @@ export function formatDateRangeID(start: string, days: number, pad = false): str
   const [endDay, endMonth, endYear] = endLabel.split(" ");
   if (startMonth === endMonth && startYear === endYear)
     return `${startDay}-${endDay} ${endMonth} ${endYear}`;
-  if (startYear === endYear)
-    return `${startDay} ${startMonth} - ${endDay} ${endMonth} ${endYear}`;
+  if (startYear === endYear) return `${startDay} ${startMonth} - ${endDay} ${endMonth} ${endYear}`;
   return `${startLabel} - ${endLabel}`;
 }
 
@@ -130,7 +133,8 @@ export function grandTotal(
 ): number {
   const rentalTotal = items.reduce((sum, it) => sum + lineTotal(it.days, it.price_per_day), 0);
   const chargesTotal = additionalCharges.reduce((sum, charge) => {
-    const amount = Number.isFinite(charge.amount) && charge.amount >= 0 ? Math.round(charge.amount) : 0;
+    const amount =
+      Number.isFinite(charge.amount) && charge.amount >= 0 ? Math.round(charge.amount) : 0;
     return sum + amount;
   }, 0);
   return rentalTotal + chargesTotal;
@@ -147,7 +151,10 @@ export function sanitizeFilenamePart(s: string): string {
 /** Invoice-15905-AstrindoTravel.pdf */
 export function invoiceFilename(number: string, client: string): string {
   const num = sanitizeFilenamePart(number) || "Draft";
-  const words = client.trim().split(/\s+/).filter((w) => !/^(pt|cv|ud)\.?$/i.test(w));
+  const words = client
+    .trim()
+    .split(/\s+/)
+    .filter((w) => !/^(pt|cv|ud)\.?$/i.test(w));
   const firstWords = words[0] ?? "";
   const cl = sanitizeFilenamePart(firstWords);
   return cl ? `Invoice-${num}-${cl}.pdf` : `Invoice-${num}.pdf`;
@@ -181,7 +188,11 @@ export const itemSchema = z.object({
   service_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal layanan wajib diisi"),
   route: z.string().trim().max(120),
   service_type: z.string().trim().max(60),
-  days: z.number().int("Jumlah hari harus bilangan bulat").positive("Jumlah hari harus lebih dari 0").max(365),
+  days: z
+    .number()
+    .int("Jumlah hari harus bilangan bulat")
+    .positive("Jumlah hari harus lebih dari 0")
+    .max(365),
   price_per_day: z.number().int().min(0, "Harga tidak boleh negatif").max(1_000_000_000),
 });
 

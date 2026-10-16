@@ -1,5 +1,3 @@
--- Adds per-day vendor pricing for rental bookings.
--- Existing bookings remain NULL until their normal price is entered.
 begin;
 
 alter table public.rental_bookings

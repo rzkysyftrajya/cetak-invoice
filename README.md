@@ -336,6 +336,40 @@ Jalankan perintah tersebut setelah mengganti `<EMAIL_AKUN>` dengan email akun ya
 
 Dashboard manajemen armada sekarang menjadi bagian dari aplikasi React/TanStack dan memakai tabel `vehicles` serta `rental_bookings` di Supabase; aplikasi tidak lagi memanggil `google.script.run`.
 
+## Login username dan data terpisah per akun
+
+Setelah migrasi awal (`0000` sampai `0003`) dijalankan, jalankan
+`supabase/username-multitenant.sql` di SQL Editor Supabase. Migrasi ini
+memindahkan data lama ke akun admin yang sudah ada, membatasi data klien,
+kendaraan, invoice, rental, pengaturan perusahaan, dan aset brand ke pemilik
+akun. Pengguna baru mendapat pengaturan perusahaan serta template invoice awal
+sesuai username. Jika percobaan sebelumnya berhenti dengan pesan `owner_id`
+sudah ada, jalankan ulang skrip versi terbaru ini; kolom yang sudah tersedia
+akan dipakai tanpa menimpa data milik akun yang sudah dipisahkan.
+
+Supabase Auth tetap mengharuskan identitas email internal. Aplikasi menerima
+username saja dan mengubahnya ke alamat internal
+`<username>@users.cetak-invoice.invalid`; alamat itu tidak dipakai untuk email.
+Di Supabase Authentication, ubah email akun admin lama ke
+`vickyrentcarnusantara@users.cetak-invoice.invalid` tanpa menghapus akunnya agar
+ID akun, role, dan kepemilikan data lama tetap sama. Setelah menjalankan migrasi,
+buat dua pengguna Auth melalui Supabase Dashboard (atau Admin API), bukan SQL:
+`boymakmurrentcar@users.cetak-invoice.invalid` dan
+`tomsrentcar@users.cetak-invoice.invalid`. Tandai email masing-masing sebagai
+terkonfirmasi. Trigger migrasi otomatis memberi peran dan menginisialisasi data
+perusahaan serta template untuk kedua username. Jangan membuat password di SQL;
+atur kredensial dengan aman melalui Supabase Dashboard. Kata sandi yang terlupa
+harus diatur ulang admin dari Supabase Dashboard karena alamat internal tersebut
+tidak dapat menerima email pemulihan.
+
+Template awal mengikuti PDF yang disediakan: Vicky memakai format yang sudah ada,
+Boy Makmur memakai format faktur, dan Toms memakai format invoice Toms Rent Car.
+Nama perusahaan, kontak, rekening, template, logo, dan tanda tangan dapat
+disesuaikan pada **Pengaturan Perusahaan** setelah masuk. Setiap akun hanya dapat
+membaca atau mengubah data dan aset brand miliknya sendiri. Unggah logo serta
+tanda tangan masing-masing perusahaan di halaman pengaturan; logo dari PDF
+referensi tidak otomatis disalin sebagai aset.
+
 1. Setelah migrasi dasar Supabase selesai, jalankan `supabase/fleet-management.sql` melalui Supabase SQL Editor.
 2. Jalankan `supabase/rental-pricing.sql` untuk menambahkan kolom harga normal per hari.
 3. Untuk memulai dengan catatan rental dan armada kosong, jalankan `supabase/clear-legacy-rental-orders.sql`. Skrip ini menghapus catatan rental yang belum memiliki kota atau berlabel Medan, lalu menghapus semua unit kendaraan. Rental lain dan invoice tetap tersimpan; referensi unit pada rental/invoice akan dikosongkan otomatis, tetapi deskripsi, harga, dan rincian invoice tidak dihapus. Klien dan pengaturan perusahaan tidak diubah.

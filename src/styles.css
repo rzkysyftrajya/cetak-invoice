@@ -127,12 +127,30 @@
   }
 }
 
-@font-face { font-family: "Poppins"; src: url("/fonts/Poppins-Regular.ttf"); font-weight: 400; }
-@font-face { font-family: "Poppins"; src: url("/fonts/Poppins-Medium.ttf"); font-weight: 500; }
-@font-face { font-family: "Poppins"; src: url("/fonts/Poppins-SemiBold.ttf"); font-weight: 600; }
-@font-face { font-family: "Poppins"; src: url("/fonts/Poppins-Bold.ttf"); font-weight: 700; }
+@font-face {
+  font-family: "Poppins";
+  src: url("/fonts/Poppins-Regular.ttf");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("/fonts/Poppins-Medium.ttf");
+  font-weight: 500;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("/fonts/Poppins-SemiBold.ttf");
+  font-weight: 600;
+}
+@font-face {
+  font-family: "Poppins";
+  src: url("/fonts/Poppins-Bold.ttf");
+  font-weight: 700;
+}
 
-@utility font-invoice { font-family: "Poppins", sans-serif; }
+@utility font-invoice {
+  font-family: "Poppins", sans-serif;
+}
 
 .invoice-sheet {
   box-sizing: border-box;
@@ -213,14 +231,30 @@
   font-size: 11px;
 }
 
-.invoice-no-col { width: 5%; }
-.invoice-car-col { width: 14%; }
-.invoice-plate-col { width: 10%; }
-.invoice-date-col { width: 20%; }
-.invoice-route-col { width: 15%; }
-.invoice-service-col { width: 16%; }
-.invoice-days-col { width: 8%; }
-.invoice-total-col { width: 12%; }
+.invoice-no-col {
+  width: 5%;
+}
+.invoice-car-col {
+  width: 14%;
+}
+.invoice-plate-col {
+  width: 10%;
+}
+.invoice-date-col {
+  width: 20%;
+}
+.invoice-route-col {
+  width: 15%;
+}
+.invoice-service-col {
+  width: 16%;
+}
+.invoice-days-col {
+  width: 8%;
+}
+.invoice-total-col {
+  width: 12%;
+}
 
 .invoice-table th,
 .invoice-table td {
@@ -245,8 +279,12 @@
   font-size: 11px;
 }
 
-.invoice-summary-description-col { width: 70%; }
-.invoice-summary-amount-col { width: 30%; }
+.invoice-summary-description-col {
+  width: 70%;
+}
+.invoice-summary-amount-col {
+  width: 30%;
+}
 
 .invoice-summary-table th,
 .invoice-summary-table td {
@@ -352,6 +390,361 @@
   font-size: 16px;
   font-weight: 600;
   text-align: center;
+}
+
+.invoice-sheet--boy {
+  padding: 13mm 12mm;
+  color: #252525;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+}
+
+.boy-header {
+  display: flex;
+  justify-content: space-between;
+  min-height: 63mm;
+}
+
+.boy-company {
+  width: 58%;
+}
+
+.boy-company h1 {
+  margin: 0 0 10mm;
+  font-size: 25px;
+}
+
+.boy-company h2 {
+  margin: 0 0 2mm;
+  font-size: 15px;
+}
+
+.boy-company p {
+  margin: 0 0 1mm;
+  color: #686868;
+  font-size: 10px;
+}
+
+.boy-header > img {
+  width: 42mm;
+  height: 32mm;
+  object-fit: contain;
+}
+
+.boy-recipient {
+  display: flex;
+  justify-content: space-between;
+  min-height: 23mm;
+  margin: 0 0 7mm;
+  padding: 4mm;
+  border: 1px solid #dedede;
+  border-radius: 2mm;
+}
+
+.boy-recipient strong,
+.boy-recipient dl dt {
+  font-size: 9px;
+}
+
+.boy-recipient h3 {
+  margin: 2mm 0 1mm;
+  font-size: 15px;
+}
+
+.boy-recipient p {
+  margin: 1mm 0;
+  color: #555;
+}
+
+.boy-recipient dl {
+  display: grid;
+  grid-template-columns: minmax(24mm, 1fr) minmax(24mm, 1fr);
+  align-content: start;
+  gap: 2mm 3mm;
+  margin: 0;
+  text-align: right;
+}
+
+.boy-recipient dd {
+  margin: 0;
+}
+
+.boy-table,
+.toms-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 10px;
+}
+
+.boy-table th,
+.boy-table td,
+.toms-table th,
+.toms-table td {
+  padding: 2.5mm 2mm;
+  border-bottom: 1px solid #e1e1e1;
+  text-align: right;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.boy-table thead,
+.toms-table thead {
+  background: #f1f2f4;
+}
+
+.boy-table th:first-child,
+.boy-table td:first-child,
+.toms-table th:nth-child(2),
+.toms-table td:nth-child(2) {
+  text-align: left;
+}
+
+.boy-table th:first-child,
+.boy-table td:first-child {
+  width: 49%;
+}
+
+.boy-table th:nth-child(2),
+.boy-table td:nth-child(2) {
+  width: 18%;
+}
+
+.boy-table th:nth-child(3),
+.boy-table td:nth-child(3) {
+  width: 14%;
+}
+
+.boy-table th:nth-child(4),
+.boy-table td:nth-child(4) {
+  width: 19%;
+}
+
+.boy-totals {
+  width: 45%;
+  margin: 5mm 0 0 auto;
+}
+
+.boy-totals > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 1mm 0;
+}
+
+.boy-totals .boy-grand-total {
+  margin-top: 2mm;
+  padding-top: 3mm;
+  border-top: 1px solid #777;
+  font-size: 14px;
+}
+
+.boy-notes {
+  margin: 5mm 0 0;
+  color: #555;
+}
+
+.boy-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: auto;
+  padding-top: 14mm;
+}
+
+.boy-bank {
+  width: 55%;
+}
+
+.boy-bank p {
+  margin: 1mm 0;
+}
+
+.boy-signature {
+  display: flex;
+  width: 36%;
+  min-height: 32mm;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: center;
+}
+
+.boy-signature img {
+  width: 34mm;
+  height: 18mm;
+  object-fit: contain;
+}
+
+.boy-signature > div {
+  height: 18mm;
+}
+
+.boy-terms {
+  margin: 5mm 0 0;
+  padding-top: 2mm;
+  border-top: 1px solid #d7d7d7;
+  font-size: 8px;
+}
+
+.invoice-sheet--toms {
+  padding: 11mm 9mm;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+}
+
+.invoice-sheet--toms > :not(.toms-watermark) {
+  position: relative;
+  z-index: 1;
+}
+
+.toms-watermark {
+  position: absolute;
+  z-index: 0;
+  top: 80mm;
+  left: 25mm;
+  width: 160mm;
+  height: 160mm;
+  object-fit: contain;
+  opacity: 0.09;
+  pointer-events: none;
+}
+
+.toms-header {
+  display: flex;
+  min-height: 37mm;
+  align-items: center;
+  gap: 3mm;
+}
+
+.toms-logo {
+  width: 28mm;
+  height: 28mm;
+  object-fit: contain;
+}
+
+.toms-company {
+  flex: 1;
+}
+
+.toms-company h1 {
+  margin: 0 0 1.5mm;
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.toms-company p {
+  margin: 0 0 1mm;
+  font-size: 9px;
+}
+
+.toms-stamp {
+  padding: 2mm 7mm;
+  border: 1.5px solid #222;
+}
+
+.toms-recipient {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1mm;
+  margin: 7mm 0 4mm;
+  text-align: right;
+}
+
+.toms-meta {
+  margin: 0 0 4mm;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.toms-table th,
+.toms-table td {
+  border: 1px solid #222;
+}
+
+.toms-table th:nth-child(1),
+.toms-table td:nth-child(1) {
+  width: 7%;
+  text-align: center;
+}
+.toms-table th:nth-child(2),
+.toms-table td:nth-child(2) {
+  width: 52%;
+}
+.toms-table th:nth-child(3),
+.toms-table td:nth-child(3) {
+  width: 16%;
+  text-align: center;
+}
+.toms-table th:nth-child(4),
+.toms-table td:nth-child(4) {
+  width: 8%;
+  text-align: center;
+}
+.toms-table th:nth-child(5),
+.toms-table td:nth-child(5) {
+  width: 17%;
+}
+
+.toms-table tbody tr {
+  min-height: 16mm;
+}
+
+.toms-table tfoot th {
+  font-weight: 700;
+}
+
+.toms-table tfoot th:first-child {
+  text-align: right;
+}
+
+.toms-notes {
+  margin: 4mm 0 0;
+}
+
+.toms-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: auto;
+  padding-top: 10mm;
+}
+
+.toms-bank {
+  width: 45%;
+  padding: 2.5mm;
+  border: 1px solid #333;
+  font-size: 9px;
+}
+
+.toms-bank p {
+  margin: 1mm 0 0;
+}
+
+.toms-signature {
+  display: flex;
+  width: 42%;
+  min-height: 40mm;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: center;
+}
+
+.toms-signature img {
+  width: 38mm;
+  height: 20mm;
+  object-fit: contain;
+}
+
+.toms-signature > div {
+  height: 20mm;
+}
+
+.toms-signature .toms-signature-company {
+  font-weight: 700;
 }
 
 @media print {

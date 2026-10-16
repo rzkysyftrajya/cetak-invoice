@@ -51,8 +51,10 @@ export type Database = {
           company_name: string;
           default_city: string;
           email: string;
-          id: number;
+          id: number | null;
+          invoice_template: "vicky" | "boy" | "toms";
           logo_path: string | null;
+          owner_id: string;
           phone: string;
           signature_path: string | null;
           signer_name: string;
@@ -66,7 +68,9 @@ export type Database = {
           default_city?: string;
           email?: string;
           id?: number;
+          invoice_template?: "vicky" | "boy" | "toms";
           logo_path?: string | null;
+          owner_id?: string;
           phone?: string;
           signature_path?: string | null;
           signer_name?: string;
@@ -80,7 +84,9 @@ export type Database = {
           default_city?: string;
           email?: string;
           id?: number;
+          invoice_template?: "vicky" | "boy" | "toms";
           logo_path?: string | null;
+          owner_id?: string;
           phone?: string;
           signature_path?: string | null;
           signer_name?: string;

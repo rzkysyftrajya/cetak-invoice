@@ -3,7 +3,7 @@ import { friendlyError } from "./api";
 
 describe("Supabase error messages", () => {
   it("explains invalid login credentials", () => {
-    expect(friendlyError({ message: "Invalid login credentials", status: 400 })).toContain("Email atau kata sandi salah");
+    expect(friendlyError({ message: "Invalid login credentials", status: 400 })).toContain("Username atau kata sandi salah");
   });
 
   it("explains unverified email addresses", () => {
