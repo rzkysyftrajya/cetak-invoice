@@ -1,6 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { pdf, Document, Page, Text, View, StyleSheet, Image } from "@react-pdf/renderer";
-import { Buffer } from "buffer/";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   CarFront,
@@ -14,7 +12,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../integrations/supabase/client";
 import { usernameToAuthEmail } from "../lib/auth";
-import { InvoiceTemplatePDF, InvoiceTemplatePreview } from "../components/invoice-templates";
+import { InvoiceTemplatePreview } from "../components/invoice-templates";
 import {
   Sheet,
   SheetContent,
@@ -58,7 +56,6 @@ import {
   formatRupiahInput,
   grandTotal,
   inclusiveDaysBetween,
-  invoiceFilename,
   lineTotal,
   newAdditionalCharge,
   newItem,
@@ -208,157 +205,6 @@ function emptyFormState(city = "Jakarta"): InvoiceInput {
 function formatCurrencyInput(value: string) {
   const digits = value.replace(/[^\d]/g, "");
   return digits ? Number(digits) : 0;
-}
-
-function emitDownload(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function InvoicePDFDocument({
-  invoice,
-  company,
-  logo,
-  signature,
-}: {
-  invoice: InvoiceInput;
-  company: CompanySettings;
-  logo: string | null;
-  signature: string | null;
-}) {
-  if (company.invoice_template !== "vicky")
-    return (
-      <InvoiceTemplatePDF invoice={invoice} company={company} logo={logo} signature={signature} />
-    );
-  const additionalCharges = invoice.additional_charges ?? [];
-  const total = grandTotal(invoice.items, additionalCharges);
-
-  return (
-    <Document>
-      <Page size="A4" style={styles.page}>
-        <View style={styles.headerRow}>
-          {logo ? <Image src={logo} style={styles.logo} /> : null}
-          <View style={styles.companyBlock}>
-            <Text style={styles.companyName}>Invoice {company.company_name}</Text>
-            <Text style={styles.muted}>{company.address}</Text>
-            <Text style={styles.muted}>
-              Telp/WA: {company.phone} | Email: {company.email}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.headerRule} />
-        <View style={styles.recipientRow}>
-          <View>
-            <Text style={styles.recipientLabel}>Yth.</Text>
-            <Text style={styles.recipientName}>{invoice.client_name}</Text>
-          </View>
-          <View style={styles.invoiceMeta}>
-            <Text style={styles.metaRow}>No invoice : {invoice.invoice_number || "-"}</Text>
-            <Text style={styles.metaRow}>
-              {invoice.city}, {formatDateID(invoice.invoice_date)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.tableWrap}>
-          <View style={styles.tableHeaderRow}>
-            <Text style={[styles.cell, styles.noCol]}>No</Text>
-            <Text style={[styles.cell, styles.carCol]}>Jenis Mobil</Text>
-            <Text style={[styles.cell, styles.plateCol]}>Nopol</Text>
-            <Text style={[styles.cell, styles.dateCol]}>Tanggal</Text>
-            <Text style={[styles.cell, styles.routeCol]}>Rute</Text>
-            <Text style={[styles.cell, styles.serviceCol]}>Tipe Layanan</Text>
-            <Text style={[styles.cell, styles.daysCol]}>Hari</Text>
-            <Text style={[styles.cell, styles.totalCol]}>Total</Text>
-          </View>
-          {invoice.items.map((item, index) => {
-            return (
-              <View key={item.key || `item-${index}`} style={styles.tableRow}>
-                <Text style={[styles.cell, styles.noCol]}>{index + 1}</Text>
-                <Text style={[styles.cell, styles.carCol]}>{item.car_type || ""}</Text>
-                <Text style={[styles.cell, styles.plateCol]}>{item.plate_number || ""}</Text>
-                <Text style={[styles.cell, styles.dateCol]}>
-                  {formatDateRangeID(item.service_date, item.days, true)}
-                </Text>
-                <Text style={[styles.cell, styles.routeCol]}>{item.route || ""}</Text>
-                <Text style={[styles.cell, styles.serviceCol]}>{item.service_type || ""}</Text>
-                <Text style={[styles.cell, styles.daysCol]}>{item.days || ""}</Text>
-                <Text style={[styles.cell, styles.totalCol]}>
-                  {formatRupiah(lineTotal(item.days, item.price_per_day))}
-                </Text>
-              </View>
-            );
-          })}
-          {Array.from({ length: Math.max(0, 10 - invoice.items.length) }, (_, index) => (
-            <View key={`empty-${index}`} style={styles.tableRow}>
-              <Text style={[styles.cell, styles.noCol]} />
-              <Text style={[styles.cell, styles.carCol]} />
-              <Text style={[styles.cell, styles.plateCol]} />
-              <Text style={[styles.cell, styles.dateCol]} />
-              <Text style={[styles.cell, styles.routeCol]} />
-              <Text style={[styles.cell, styles.serviceCol]} />
-              <Text style={[styles.cell, styles.daysCol]} />
-              <Text style={[styles.cell, styles.totalCol]} />
-            </View>
-          ))}
-        </View>
-        <View style={styles.invoiceSummary}>
-          {additionalCharges.length > 0 ? (
-            <>
-              <View style={styles.summaryHeadingRow}>
-                <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>
-                  Biaya Tambahan
-                </Text>
-                <Text style={[styles.summaryCell, styles.summaryAmountCol]}>Nominal</Text>
-              </View>
-              {additionalCharges.map((charge, index) => (
-                <View key={charge.key || `charge-${index}`} style={styles.summaryRow}>
-                  <Text style={[styles.summaryCell, styles.summaryDescriptionCol]}>
-                    {charge.description}
-                  </Text>
-                  <Text style={[styles.summaryCell, styles.summaryAmountCol]}>
-                    {formatRupiah(charge.amount)}
-                  </Text>
-                </View>
-              ))}
-            </>
-          ) : null}
-          <View style={styles.summaryTotalRow}>
-            <Text style={[styles.summaryCell, styles.summaryTotalLabel]}>Grand Total :</Text>
-            <Text style={[styles.summaryCell, styles.summaryTotalAmount]}>
-              {formatRupiah(total)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.footerRow}>
-          <View style={styles.bankBox}>
-            {company.bank_accounts.map((account) => (
-              <View key={`${account.bank}-${account.number}`} style={styles.bankEntry}>
-                <Text style={styles.bankName}>{account.bank}</Text>
-                <Text style={styles.bankText}>A/N {account.name}</Text>
-                <Text style={styles.bankText}>AC No: {account.number}</Text>
-              </View>
-            ))}
-          </View>
-          <View style={styles.signatureBox}>
-            {logo ? <Image src={logo} style={styles.signatureWatermark} /> : null}
-            <Text style={styles.signText}>Hormat Kami</Text>
-            <Text style={styles.signCompany}>{company.company_name}</Text>
-            {signature ? <Image src={signature} style={styles.signature} /> : null}
-            <Text style={styles.signName}>{company.signer_name}</Text>
-            <Text style={styles.signTitle}>{company.signer_title}</Text>
-          </View>
-        </View>
-        <Text style={styles.footer}>Terima Kasih!</Text>
-      </Page>
-    </Document>
-  );
 }
 
 function InvoicePreview({
@@ -1001,30 +847,6 @@ function Index() {
       window.alert(friendlyError(error));
     } finally {
       setInvoiceSaving(false);
-    }
-  }
-
-  async function downloadPdf() {
-    if (!form.invoice_number.trim()) {
-      window.alert("Nomor invoice wajib diisi sebelum unduh PDF.");
-      return;
-    }
-    try {
-      if (typeof globalThis.Buffer === "undefined") {
-        Object.defineProperty(globalThis, "Buffer", { configurable: true, value: Buffer });
-      }
-      const assets = await resolveBrandUrls(companySettings);
-      const blob = await pdf(
-        <InvoicePDFDocument
-          invoice={form}
-          company={companySettings}
-          logo={assets.logo}
-          signature={assets.signature}
-        />,
-      ).toBlob();
-      emitDownload(invoiceFilename(form.invoice_number, form.client_name), blob);
-    } catch (error) {
-      window.alert(friendlyError(error));
     }
   }
 
@@ -2515,13 +2337,6 @@ function Index() {
                   </button>
                   <button
                     type="button"
-                    onClick={downloadPdf}
-                    className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground"
-                  >
-                    Download PDF
-                  </button>
-                  <button
-                    type="button"
                     onClick={printInvoice}
                     className="rounded-xl border border-border bg-white px-4 py-3 text-sm font-semibold text-foreground"
                   >
@@ -3019,193 +2834,3 @@ function Index() {
     </div>
   );
 }
-
-const styles = StyleSheet.create({
-  page: {
-    padding: 24,
-    backgroundColor: "#ffffff",
-    fontFamily: "Helvetica",
-    color: "#111827",
-    flexDirection: "column",
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    minHeight: 106,
-  },
-  companyBlock: {
-    flex: 1,
-    alignItems: "center",
-    paddingRight: 56,
-  },
-  logo: {
-    width: 76,
-    height: 76,
-    objectFit: "contain",
-  },
-  companyName: {
-    fontSize: 24,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 5,
-  },
-  muted: {
-    fontSize: 11,
-    color: "#333333",
-    textAlign: "center",
-    marginBottom: 2,
-  },
-  headerRule: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#222222",
-    marginTop: 3,
-    marginBottom: 19,
-  },
-  recipientRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginHorizontal: 14,
-    marginBottom: 62,
-  },
-  metaRow: {
-    fontSize: 12,
-    marginBottom: 3,
-  },
-  invoiceMeta: {
-    alignItems: "flex-end",
-  },
-  recipientLabel: {
-    fontSize: 12,
-    fontWeight: "bold",
-    marginBottom: 3,
-  },
-  recipientName: {
-    fontSize: 12,
-  },
-  tableWrap: {
-    marginHorizontal: 0,
-  },
-  tableHeaderRow: {
-    flexDirection: "row",
-  },
-  tableRow: {
-    flexDirection: "row",
-  },
-  cell: {
-    fontSize: 11,
-    textAlign: "center",
-    paddingVertical: 4,
-    paddingHorizontal: 2,
-    borderWidth: 0.4,
-    borderColor: "#222222",
-    height: 28,
-  },
-  noCol: { width: "5%" },
-  carCol: { width: "14%" },
-  plateCol: { width: "10%" },
-  dateCol: { width: "20%" },
-  routeCol: { width: "15%" },
-  serviceCol: { width: "16%" },
-  daysCol: { width: "8%" },
-  totalCol: { width: "12%" },
-  invoiceSummary: {
-    width: "60%",
-    alignSelf: "flex-end",
-    marginTop: 8,
-  },
-  summaryHeadingRow: {
-    flexDirection: "row",
-  },
-  summaryRow: {
-    flexDirection: "row",
-  },
-  summaryCell: {
-    fontSize: 10,
-    paddingVertical: 4,
-    paddingHorizontal: 5,
-    borderWidth: 0.4,
-    borderColor: "#222222",
-  },
-  summaryDescriptionCol: {
-    width: "70%",
-    textAlign: "left",
-  },
-  summaryAmountCol: {
-    width: "30%",
-    textAlign: "right",
-  },
-  summaryTotalRow: {
-    flexDirection: "row",
-    marginTop: 4,
-  },
-  summaryTotalLabel: {
-    fontWeight: "bold",
-  },
-  summaryTotalAmount: {
-    fontWeight: "bold",
-  },
-  footerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: "auto",
-    marginBottom: 25,
-  },
-  bankBox: {
-    width: 175,
-    padding: 11,
-    borderWidth: 0.8,
-    borderColor: "#222222",
-    borderRadius: 10,
-  },
-  bankEntry: {
-    marginBottom: 4,
-  },
-  bankName: {
-    fontSize: 10,
-    fontWeight: "bold",
-  },
-  bankText: {
-    fontSize: 9,
-    lineHeight: 1.2,
-  },
-  signatureBox: {
-    position: "relative",
-    width: 190,
-    alignItems: "center",
-  },
-  signatureWatermark: {
-    position: "absolute",
-    top: 12,
-    left: 30,
-    width: 130,
-    height: 130,
-    opacity: 0.12,
-  },
-  signText: {
-    fontSize: 11,
-    marginBottom: 2,
-  },
-  signCompany: {
-    fontSize: 11,
-    fontWeight: "bold",
-  },
-  signature: {
-    width: 125,
-    height: 62,
-    objectFit: "contain",
-  },
-  signName: {
-    fontSize: 11,
-    fontWeight: "bold",
-  },
-  signTitle: {
-    fontSize: 10,
-  },
-  footer: {
-    textAlign: "center",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-});
