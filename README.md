@@ -371,10 +371,10 @@ tanda tangan masing-masing perusahaan di halaman pengaturan; logo dari PDF
 referensi tidak otomatis disalin sebagai aset.
 
 1. Setelah migrasi dasar Supabase selesai, jalankan `supabase/fleet-management.sql` melalui Supabase SQL Editor.
-2. Jalankan `supabase/rental-pricing.sql` untuk menambahkan kolom harga normal per hari.
+2. Jalankan `supabase/rental-pricing.sql` untuk menambahkan kolom harga normal per hari dan total jual sesuai invoice.
 3. Untuk memulai dengan catatan rental dan armada kosong, jalankan `supabase/clear-legacy-rental-orders.sql`. Skrip ini menghapus catatan rental yang belum memiliki kota atau berlabel Medan, lalu menghapus semua unit kendaraan. Rental lain dan invoice tetap tersimpan; referensi unit pada rental/invoice akan dikosongkan otomatis, tetapi deskripsi, harga, dan rincian invoice tidak dihapus. Klien dan pengaturan perusahaan tidak diubah.
 4. Deploy ulang aplikasi React/TanStack. Form **Rental** meminta kota tujuan, menyarankan Surabaya, Jakarta, Semarang, Makassar, Batam, dan Yogyakarta, serta mengizinkan kota lain. Kota Medan ditolak untuk order baru.
-5. Setiap catatan rental meminta **harga normal per hari** dan **harga jual ke tamu per hari**. Keuntungan bersih dihitung dari `(harga jual − harga normal) × jumlah hari − biaya operasional driver`. Transaksi lama tidak memiliki harga normal; lengkapi data tersebut agar masuk dalam perhitungan keuntungan bersih.
+5. Catatan rental menerima **harga normal per hari** (opsional) dan **harga jual ke tamu per hari**. Jika invoice memiliki nominal total yang tidak bisa diwakili tepat dengan harga harian, simpan juga **total jual sesuai invoice**; nilai ini dipakai sebagai total tagihan. Keuntungan bersih belum tersedia sampai harga normal diisi, lalu dihitung dari total jual dikurangi biaya normal dan biaya operasional driver.
 6. Dashboard menggabungkan order dari semua kota. Di **Pendapatan / Kota**, laporan menampilkan ringkasan pendapatan per kota dan dapat difilter ke kota tertentu.
 7. Data yang sebelumnya hanya berada di Google Sheets tidak disalin otomatis. Jika masih diperlukan, ekspor dan impor hanya catatan rental yang ingin dipertahankan sebelum menjalankan skrip pembersihan.
 

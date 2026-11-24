@@ -298,6 +298,7 @@ export type Database = {
           route: string | null;
           rental_mode: "Kalender" | "24jam";
           service: string;
+          selling_price: number | null;
           start_date: string;
           start_time: string | null;
           updated_at: string;
@@ -325,6 +326,7 @@ export type Database = {
           route?: string | null;
           rental_mode?: "Kalender" | "24jam";
           service?: string;
+          selling_price?: number | null;
           start_date: string;
           start_time?: string | null;
           updated_at?: string;
@@ -352,6 +354,7 @@ export type Database = {
           route?: string | null;
           rental_mode?: "Kalender" | "24jam";
           service?: string;
+          selling_price?: number | null;
           start_date?: string;
           start_time?: string | null;
           updated_at?: string;

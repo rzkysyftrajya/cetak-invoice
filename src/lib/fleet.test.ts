@@ -48,6 +48,7 @@ const rental: FleetRental = {
   route: null,
   normal_rate: 300000,
   daily_rate: 500000,
+  selling_price: null,
   deposit: 100000,
   paid: 200000,
   driver_cost: 50000,
@@ -99,6 +100,12 @@ describe("fleet calculations", () => {
     expect(rentalNormalCost(rental)).toBe(600_000);
     expect(rentalNetProfit(rental)).toBe(350_000);
     expect(rentalNetProfit({ ...rental, normal_rate: null })).toBeNull();
+  });
+
+  it("uses an exact invoice total instead of multiplying the rounded daily sale price", () => {
+    const invoicePricedRental = { ...rental, daily_rate: 233_333, selling_price: 7_000_000 };
+    expect(rentalTotal(invoicePricedRental)).toBe(7_000_000);
+    expect(rentalNetProfit({ ...invoicePricedRental, normal_rate: null })).toBeNull();
   });
 
   it("classifies tax dates as overdue, due soon, safe, or missing", () => {

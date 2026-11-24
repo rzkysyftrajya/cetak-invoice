@@ -39,6 +39,7 @@ export type FleetRental = {
   route: string | null;
   normal_rate: number | null;
   daily_rate: number;
+  selling_price: number | null;
   deposit: number;
   paid: number;
   driver_cost: number;
@@ -97,9 +98,16 @@ export function rentalDuration(
 export function rentalTotal(
   rental: Pick<
     FleetRental,
-    "start_date" | "end_date" | "rental_mode" | "start_time" | "end_time" | "daily_rate"
+    | "start_date"
+    | "end_date"
+    | "rental_mode"
+    | "start_time"
+    | "end_time"
+    | "daily_rate"
+    | "selling_price"
   >,
 ): number {
+  if (rental.selling_price !== null) return rental.selling_price;
   return (
     rentalDuration(
       rental.start_date,
@@ -139,6 +147,7 @@ export function rentalNetProfit(
     | "end_time"
     | "normal_rate"
     | "daily_rate"
+    | "selling_price"
     | "driver_cost"
   >,
 ): number | null {

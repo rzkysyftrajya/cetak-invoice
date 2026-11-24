@@ -71,6 +71,7 @@ type RentalForm = {
   route: string;
   normal_rate: string;
   daily_rate: string;
+  selling_price: string;
   deposit: string;
   paid: string;
   driver_cost: string;
@@ -134,6 +135,7 @@ function emptyRentalForm(): RentalForm {
     route: "",
     normal_rate: "",
     daily_rate: "0",
+    selling_price: "",
     deposit: "0",
     paid: "0",
     driver_cost: "0",
@@ -319,6 +321,7 @@ export function FleetManagement({
       route: rental.route ?? "",
       normal_rate: rental.normal_rate === null ? "" : String(rental.normal_rate),
       daily_rate: String(rental.daily_rate),
+      selling_price: rental.selling_price === null ? "" : String(rental.selling_price),
       deposit: String(rental.deposit),
       paid: String(rental.paid),
       driver_cost: String(rental.driver_cost),
@@ -425,18 +428,18 @@ export function FleetManagement({
       window.alert("Periksa kembali tanggal dan jam mulai/selesai rental.");
       return;
     }
-    if (!rentalForm.normal_rate.trim()) {
-      window.alert("Harga normal per hari wajib diisi agar keuntungan bersih dapat dihitung.");
-      return;
-    }
-    const normalRate = amountInput(rentalForm.normal_rate);
+    const normalRate = rentalForm.normal_rate.trim() ? amountInput(rentalForm.normal_rate) : null;
+    const sellingPrice = rentalForm.selling_price.trim()
+      ? amountInput(rentalForm.selling_price)
+      : null;
     const money = [
       normalRate,
+      sellingPrice,
       amountInput(rentalForm.daily_rate),
       amountInput(rentalForm.deposit),
       amountInput(rentalForm.paid),
       amountInput(rentalForm.driver_cost),
-    ];
+    ].filter((amount): amount is number => amount !== null);
     if (
       money.some((amount) => !Number.isSafeInteger(amount) || amount < 0 || amount > 10_000_000_000)
     ) {
@@ -461,6 +464,7 @@ export function FleetManagement({
       route: rentalForm.route.trim() || null,
       daily_rate: amountInput(rentalForm.daily_rate),
       normal_rate: normalRate,
+      selling_price: sellingPrice,
       deposit: amountInput(rentalForm.deposit),
       paid: amountInput(rentalForm.paid),
       driver_cost: amountInput(rentalForm.driver_cost),
@@ -491,24 +495,19 @@ export function FleetManagement({
     setRentalForm((current) => ({ ...current, [key]: value }));
   }
 
+  const rentalDays = rentalDuration(
+    rentalForm.start_date,
+    rentalForm.end_date,
+    rentalForm.rental_mode,
+    rentalForm.start_time,
+    rentalForm.end_time,
+  );
   const rentalPreview =
-    rentalDuration(
-      rentalForm.start_date,
-      rentalForm.end_date,
-      rentalForm.rental_mode,
-      rentalForm.start_time,
-      rentalForm.end_time,
-    ) * amountInput(rentalForm.daily_rate);
+    rentalForm.selling_price.trim() === ""
+      ? rentalDays * amountInput(rentalForm.daily_rate)
+      : amountInput(rentalForm.selling_price);
   const rentalNormalCostPreview =
-    rentalForm.normal_rate.trim() === ""
-      ? null
-      : rentalDuration(
-          rentalForm.start_date,
-          rentalForm.end_date,
-          rentalForm.rental_mode,
-          rentalForm.start_time,
-          rentalForm.end_time,
-        ) * amountInput(rentalForm.normal_rate);
+    rentalForm.normal_rate.trim() === "" ? null : rentalDays * amountInput(rentalForm.normal_rate);
   const rentalNetProfitPreview =
     rentalNormalCostPreview === null
       ? null
@@ -989,9 +988,8 @@ export function FleetManagement({
                   className={inputClass}
                 />
               </Field>
-              <Field label="Harga normal per hari *">
+              <Field label="Harga normal per hari (opsional)">
                 <input
-                  required
                   inputMode="numeric"
                   value={formatRupiahInput(rentalForm.normal_rate)}
                   onChange={(event) =>
@@ -1010,6 +1008,19 @@ export function FleetManagement({
                   }
                   className={inputClass}
                 />
+              </Field>
+              <Field label="Total jual sesuai invoice (opsional)">
+                <input
+                  inputMode="numeric"
+                  value={formatRupiahInput(rentalForm.selling_price)}
+                  onChange={(event) =>
+                    changeRentalForm("selling_price", formatRupiahInput(event.target.value))
+                  }
+                  className={inputClass}
+                />
+                <span className="block text-xs text-muted-foreground">
+                  Jika diisi, total ini menggantikan perhitungan harga jual per hari.
+                </span>
               </Field>
               <Field label="Deposit">
                 <input
@@ -1343,9 +1354,13 @@ function RentalTable({
                 <td className="p-3">{days}</td>
                 <td className="p-3">
                   {formatRupiah(total)}
-                  <div className="text-xs text-muted-foreground">
-                    Jual/hari {formatRupiah(rental.daily_rate)}
-                  </div>
+                  {rental.selling_price === null ? (
+                    <div className="text-xs text-muted-foreground">
+                      Jual/hari {formatRupiah(rental.daily_rate)}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">Total dari invoice</div>
+                  )}
                   <div className="text-xs text-muted-foreground">
                     Normal/hari{" "}
                     {rental.normal_rate === null ? "Belum diisi" : formatRupiah(rental.normal_rate)}

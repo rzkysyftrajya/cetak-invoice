@@ -208,9 +208,11 @@ export type RentalBookingInput = Omit<
   | "end_time"
   | "driver_cost"
   | "normal_rate"
+  | "selling_price"
 > & {
   id?: string;
-  normal_rate: number;
+  normal_rate: number | null;
+  selling_price?: number | null;
   rental_mode?: FleetRentalMode;
   start_time?: string | null;
   end_time?: string | null;
@@ -221,7 +223,7 @@ export async function listRentalBookings(): Promise<RentalBooking[]> {
   const { data, error } = await supabase
     .from("rental_bookings")
     .select(
-      "id,vehicle_id,city,car_type,plate_number,customer_name,whatsapp,start_date,end_date,start_time,end_time,rental_mode,service,route,normal_rate,daily_rate,deposit,paid,driver_cost,payment_status,booking_status,notes,created_at,updated_at",
+      "id,vehicle_id,city,car_type,plate_number,customer_name,whatsapp,start_date,end_date,start_time,end_time,rental_mode,service,route,normal_rate,daily_rate,selling_price,deposit,paid,driver_cost,payment_status,booking_status,notes,created_at,updated_at",
     )
     .order("start_date", { ascending: false })
     .order("created_at", { ascending: false });
