@@ -1,0 +1,17 @@
+/* Keep dashboard content inside the viewport on narrow screens. */
+main {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  /* The month controls otherwise stay on one line and push the page off-screen. */
+  main > div > section:first-child > div:last-child {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  main > div > section:first-child > div:last-child > div {
+    flex: 1 1 auto;
+  }
+}
