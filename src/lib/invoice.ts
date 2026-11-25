@@ -25,8 +25,10 @@ export type InvoiceItemInput = {
   service_date: string;
   route: string;
   service_type: string;
+  billing_unit: "day" | "12_hours";
   days: number;
-  price_per_day: number;
+  quantity: number;
+  unit_price: number;
 };
 
 export type InvoiceAdditionalChargeInput = {
@@ -121,17 +123,35 @@ export function todayISO(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function lineTotal(days: number, price: number): number {
-  const d = Number.isInteger(days) && days > 0 ? days : 0;
+export function lineTotal(quantity: number, price: number): number {
+  const units = Number.isInteger(quantity) && quantity > 0 ? quantity : 0;
   const p = Number.isFinite(price) && price >= 0 ? Math.round(price) : 0;
-  return d * p;
+  return units * p;
+}
+
+export function billingUnitLabel(unit: InvoiceItemInput["billing_unit"]): string {
+  return unit === "12_hours" ? "12 jam" : "hari";
+}
+
+export function formatBillingQuantity(
+  quantity: number,
+  unit: InvoiceItemInput["billing_unit"],
+): string {
+  return unit === "12_hours" ? `${quantity} × 12 jam` : `${quantity} hari`;
+}
+
+export function isBoyMakmurClient(name: string): boolean {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .includes("boymakmur");
 }
 
 export function grandTotal(
-  items: Pick<InvoiceItemInput, "days" | "price_per_day">[],
+  items: Pick<InvoiceItemInput, "quantity" | "unit_price">[],
   additionalCharges: Pick<InvoiceAdditionalChargeInput, "amount">[] = [],
 ): number {
-  const rentalTotal = items.reduce((sum, it) => sum + lineTotal(it.days, it.price_per_day), 0);
+  const rentalTotal = items.reduce((sum, it) => sum + lineTotal(it.quantity, it.unit_price), 0);
   const chargesTotal = additionalCharges.reduce((sum, charge) => {
     const amount =
       Number.isFinite(charge.amount) && charge.amount >= 0 ? Math.round(charge.amount) : 0;
@@ -169,8 +189,10 @@ export function newItem(): InvoiceItemInput {
     service_date: todayISO(),
     route: "",
     service_type: "Dengan Driver",
+    billing_unit: "day",
     days: 1,
-    price_per_day: 0,
+    quantity: 1,
+    unit_price: 0,
   };
 }
 
@@ -188,12 +210,18 @@ export const itemSchema = z.object({
   service_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tanggal layanan wajib diisi"),
   route: z.string().trim().max(120),
   service_type: z.string().trim().max(60),
+  billing_unit: z.enum(["day", "12_hours"]),
   days: z
     .number()
     .int("Jumlah hari harus bilangan bulat")
     .positive("Jumlah hari harus lebih dari 0")
     .max(365),
-  price_per_day: z.number().int().min(0, "Harga tidak boleh negatif").max(1_000_000_000),
+  quantity: z
+    .number()
+    .int("Jumlah unit harus bilangan bulat")
+    .positive("Jumlah unit harus lebih dari 0")
+    .max(365),
+  unit_price: z.number().int().min(0, "Harga tidak boleh negatif").max(1_000_000_000),
 });
 
 export const additionalChargeSchema = z.object({

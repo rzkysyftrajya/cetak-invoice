@@ -2,6 +2,8 @@ import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/render
 import {
   formatDateID,
   formatDateRangeID,
+  formatBillingQuantity,
+  billingUnitLabel,
   formatRupiah,
   grandTotal,
   lineTotal,
@@ -80,7 +82,7 @@ function BoyInvoicePDF({ invoice, company, logo, signature }: TemplateProps) {
         <View style={boyPdf.table}>
           <View style={boyPdf.tableHeader}>
             <Text style={[boyPdf.cell, boyPdf.description]}>KETERANGAN</Text>
-            <Text style={[boyPdf.cell, boyPdf.price]}>HARGA</Text>
+            <Text style={[boyPdf.cell, boyPdf.price]}>TARIF / UNIT</Text>
             <Text style={[boyPdf.cell, boyPdf.quantity]}>KUANTITAS</Text>
             <Text style={[boyPdf.cell, boyPdf.amount]}>JUMLAH</Text>
           </View>
@@ -96,10 +98,14 @@ function BoyInvoicePDF({ invoice, company, logo, signature }: TemplateProps) {
                   item.days,
                 )}
               </Text>
-              <Text style={[boyPdf.cell, boyPdf.price]}>{formatRupiah(item.price_per_day)}</Text>
-              <Text style={[boyPdf.cell, boyPdf.quantity]}>{item.days}</Text>
+              <Text style={[boyPdf.cell, boyPdf.price]}>
+                {formatRupiah(item.unit_price)} / {billingUnitLabel(item.billing_unit)}
+              </Text>
+              <Text style={[boyPdf.cell, boyPdf.quantity]}>
+                {formatBillingQuantity(item.quantity, item.billing_unit)}
+              </Text>
               <Text style={[boyPdf.cell, boyPdf.amount]}>
-                {formatRupiah(lineTotal(item.days, item.price_per_day))}
+                {formatRupiah(lineTotal(item.quantity, item.unit_price))}
               </Text>
             </View>
           ))}
@@ -203,7 +209,7 @@ function TomsInvoicePDF({ invoice, company, logo, signature }: TemplateProps) {
           <View style={tomsPdf.tableHeader}>
             <Text style={[tomsPdf.cell, tomsPdf.no]}>No</Text>
             <Text style={[tomsPdf.cell, tomsPdf.description]}>Keterangan</Text>
-            <Text style={[tomsPdf.cell, tomsPdf.price]}>Harga Perhari</Text>
+            <Text style={[tomsPdf.cell, tomsPdf.price]}>Tarif / Unit</Text>
             <Text style={[tomsPdf.cell, tomsPdf.units]}>Unit</Text>
             <Text style={[tomsPdf.cell, tomsPdf.amount]}>Harga</Text>
           </View>
@@ -220,10 +226,14 @@ function TomsInvoicePDF({ invoice, company, logo, signature }: TemplateProps) {
                   item.days,
                 )}
               </Text>
-              <Text style={[tomsPdf.cell, tomsPdf.price]}>{formatRupiah(item.price_per_day)}</Text>
-              <Text style={[tomsPdf.cell, tomsPdf.units]}>{item.days}</Text>
+              <Text style={[tomsPdf.cell, tomsPdf.price]}>
+                {formatRupiah(item.unit_price)} / {billingUnitLabel(item.billing_unit)}
+              </Text>
+              <Text style={[tomsPdf.cell, tomsPdf.units]}>
+                {formatBillingQuantity(item.quantity, item.billing_unit)}
+              </Text>
               <Text style={[tomsPdf.cell, tomsPdf.amount]}>
-                {formatRupiah(lineTotal(item.days, item.price_per_day))}
+                {formatRupiah(lineTotal(item.quantity, item.unit_price))}
               </Text>
             </View>
           ))}
@@ -309,7 +319,7 @@ export function InvoiceTemplatePreview({ invoice, company, logo, signature }: Te
           <thead>
             <tr>
               <th>KETERANGAN</th>
-              <th>HARGA</th>
+              <th>TARIF / UNIT</th>
               <th>KUANTITAS</th>
               <th>JUMLAH</th>
             </tr>
@@ -327,9 +337,11 @@ export function InvoiceTemplatePreview({ invoice, company, logo, signature }: Te
                     item.days,
                   )}
                 </td>
-                <td>{formatRupiah(item.price_per_day)}</td>
-                <td>{item.days}</td>
-                <td>{formatRupiah(lineTotal(item.days, item.price_per_day))}</td>
+                <td>
+                  {formatRupiah(item.unit_price)} / {billingUnitLabel(item.billing_unit)}
+                </td>
+                <td>{formatBillingQuantity(item.quantity, item.billing_unit)}</td>
+                <td>{formatRupiah(lineTotal(item.quantity, item.unit_price))}</td>
               </tr>
             ))}
             {charges.map((charge, index) => (
@@ -419,7 +431,7 @@ export function InvoiceTemplatePreview({ invoice, company, logo, signature }: Te
           <tr>
             <th>No</th>
             <th>Keterangan</th>
-            <th>Harga Perhari</th>
+            <th>Tarif / Unit</th>
             <th>Unit</th>
             <th>Harga</th>
           </tr>
@@ -438,9 +450,11 @@ export function InvoiceTemplatePreview({ invoice, company, logo, signature }: Te
                   item.days,
                 )}
               </td>
-              <td>{formatRupiah(item.price_per_day)}</td>
-              <td>{item.days}</td>
-              <td>{formatRupiah(lineTotal(item.days, item.price_per_day))}</td>
+              <td>
+                {formatRupiah(item.unit_price)} / {billingUnitLabel(item.billing_unit)}
+              </td>
+              <td>{formatBillingQuantity(item.quantity, item.billing_unit)}</td>
+              <td>{formatRupiah(lineTotal(item.quantity, item.unit_price))}</td>
             </tr>
           ))}
           {charges.map((charge, index) => (

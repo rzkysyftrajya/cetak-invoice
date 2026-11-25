@@ -43,7 +43,7 @@ export function friendlyError(err: unknown): string {
   if (/Nomor invoice final/i.test(msg)) return "Nomor invoice final tidak dapat diubah.";
   if (/Keterangan biaya|Biaya tidak valid/i.test(msg)) return msg;
   if (
-    /Jumlah hari|Harga tidak valid|Minimal satu baris|tidak ditemukan|rental|mobil|tanggal|Nominal|Nama pelanggan|Pilih mobil/i.test(
+    /Jumlah hari|Jumlah unit|Satuan tagihan|Harga tidak valid|Minimal satu baris|tidak ditemukan|rental|mobil|tanggal|Nominal|Nama pelanggan|Pilih mobil/i.test(
       msg,
     )
   )
@@ -319,8 +319,10 @@ export async function getInvoice(id: string): Promise<InvoiceInput & { id: strin
       service_date: it.service_date ?? "",
       route: it.route ?? "",
       service_type: it.service_type ?? "",
+      billing_unit: it.billing_unit === "12_hours" ? "12_hours" : "day",
       days: it.days,
-      price_per_day: Number(it.price_per_day),
+      quantity: it.quantity ?? it.days,
+      unit_price: Number(it.price_per_day),
     })),
   };
 }
@@ -364,8 +366,10 @@ export async function listAllInvoices(): Promise<
         service_date: item.service_date ?? "",
         route: item.route ?? "",
         service_type: item.service_type ?? "",
+        billing_unit: item.billing_unit === "12_hours" ? "12_hours" : "day",
         days: item.days,
-        price_per_day: Number(item.price_per_day),
+        quantity: item.quantity ?? item.days,
+        unit_price: Number(item.price_per_day),
       })),
   }));
 }
@@ -408,8 +412,10 @@ export async function saveInvoice(inv: InvoiceInput): Promise<string> {
       service_date: it.service_date,
       route: it.route.trim(),
       service_type: it.service_type.trim(),
+      billing_unit: it.billing_unit,
       days: it.days,
-      price_per_day: it.price_per_day,
+      quantity: it.quantity,
+      price_per_day: it.unit_price,
     })),
   };
   const { data, error } = await supabase.rpc("save_invoice", { p: payload });

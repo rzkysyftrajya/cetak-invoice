@@ -99,6 +99,7 @@ export type Database = {
         Row: {
           car_type: string;
           created_at: string;
+          billing_unit: string;
           days: number;
           id: string;
           invoice_id: string;
@@ -106,6 +107,7 @@ export type Database = {
           plate_number: string | null;
           position: number;
           price_per_day: number;
+          quantity: number;
           route: string | null;
           service_date: string | null;
           service_type: string | null;
@@ -114,6 +116,7 @@ export type Database = {
         Insert: {
           car_type: string;
           created_at?: string;
+          billing_unit?: string;
           days: number;
           id?: string;
           invoice_id: string;
@@ -121,6 +124,7 @@ export type Database = {
           plate_number?: string | null;
           position: number;
           price_per_day: number;
+          quantity?: number;
           route?: string | null;
           service_date?: string | null;
           service_type?: string | null;
@@ -128,6 +132,7 @@ export type Database = {
         };
         Update: {
           car_type?: string;
+          billing_unit?: string;
           created_at?: string;
           days?: number;
           id?: string;
@@ -136,6 +141,7 @@ export type Database = {
           plate_number?: string | null;
           position?: number;
           price_per_day?: number;
+          quantity?: number;
           route?: string | null;
           service_date?: string | null;
           service_type?: string | null;

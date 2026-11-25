@@ -49,13 +49,16 @@ import {
   DEFAULT_LOGO,
   DEFAULT_SIGNATURE,
   addDaysToISODate,
+  billingUnitLabel,
   emptyInvoice,
   formatDateID,
+  formatBillingQuantity,
   formatDateRangeID,
   formatRupiah,
   formatRupiahInput,
   grandTotal,
   inclusiveDaysBetween,
+  isBoyMakmurClient,
   lineTotal,
   newAdditionalCharge,
   newItem,
@@ -276,7 +279,7 @@ function InvoicePreview({
             <th>Tanggal</th>
             <th>Rute</th>
             <th>Tipe Layanan</th>
-            <th>Hari</th>
+            <th>Durasi</th>
             <th>Total</th>
           </tr>
         </thead>
@@ -291,8 +294,8 @@ function InvoicePreview({
                 <td>{item ? formatDateRangeID(item.service_date, item.days, true) : ""}</td>
                 <td>{item?.route || ""}</td>
                 <td>{item?.service_type || ""}</td>
-                <td>{item?.days || ""}</td>
-                <td>{item ? formatRupiah(lineTotal(item.days, item.price_per_day)) : ""}</td>
+                <td>{item ? formatBillingQuantity(item.quantity, item.billing_unit) : ""}</td>
+                <td>{item ? formatRupiah(lineTotal(item.quantity, item.unit_price)) : ""}</td>
               </tr>
             );
           })}
@@ -407,6 +410,7 @@ function Index() {
   const [rentalSaving, setRentalSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [printWhenReady, setPrintWhenReady] = useState(false);
+  const isBoyMakmurInvoice = isBoyMakmurClient(form.client_name);
 
   useEffect(() => {
     let active = true;
@@ -638,8 +642,16 @@ function Index() {
       items: current.items.map((item, itemIndex) => {
         if (itemIndex !== index) return item;
         const nextItem = { ...item, [field]: value };
-        if (field === "days") nextItem.days = Number(value) || 0;
-        if (field === "price_per_day") nextItem.price_per_day = parseRupiah(String(value));
+        if (field === "billing_unit") {
+          nextItem.billing_unit = value === "12_hours" ? "12_hours" : "day";
+          if (nextItem.billing_unit === "day") nextItem.quantity = nextItem.days;
+        }
+        if (field === "days") {
+          nextItem.days = Number(value) || 0;
+          if (nextItem.billing_unit === "day") nextItem.quantity = nextItem.days;
+        }
+        if (field === "quantity") nextItem.quantity = Number(value) || 0;
+        if (field === "unit_price") nextItem.unit_price = parseRupiah(String(value));
         return nextItem;
       }),
     }));
@@ -693,10 +705,12 @@ function Index() {
           return item;
         if (field === "start" && !startDate) return { ...item, service_date: "" };
         const days = inclusiveDaysBetween(startDate, endDate);
+        const nextDays = days > 0 ? Math.min(days, 365) : 1;
         return {
           ...item,
           service_date: startDate,
-          days: days > 0 ? Math.min(days, 365) : 1,
+          days: nextDays,
+          quantity: item.billing_unit === "day" ? nextDays : item.quantity,
         };
       }),
     }));
@@ -791,18 +805,28 @@ function Index() {
       window.alert("Nama perusahaan atau klien wajib diisi.");
       return;
     }
+    if (!isBoyMakmurInvoice && form.items.some((item) => item.billing_unit === "12_hours")) {
+      window.alert("Tarif per 12 jam hanya tersedia untuk invoice Boy Makmur Rent Car.");
+      return;
+    }
     if (
       form.items.some(
         (item) =>
           !item.car_type.trim() ||
           !item.service_date ||
+          !Number.isInteger(item.days) ||
           item.days <= 0 ||
           item.days > 365 ||
-          item.price_per_day < 0,
+          !Number.isInteger(item.quantity) ||
+          item.quantity <= 0 ||
+          item.quantity > 365 ||
+          !Number.isInteger(item.unit_price) ||
+          item.unit_price < 0 ||
+          item.unit_price > 1_000_000_000,
       )
     ) {
       window.alert(
-        "Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, rentang tanggal, hari, dan harga per hari.",
+        "Terdapat baris kendaraan yang belum valid. Periksa jenis mobil, rentang tanggal, durasi, dan tarif satuan.",
       );
       return;
     }
@@ -1137,10 +1161,22 @@ function Index() {
           updatedAt: _updatedAt,
           ...invoiceData
         } = invoice;
+        const items = invoice.items.map((item) => {
+          const legacyItem = item as InvoiceItemInput & { price_per_day?: number };
+          const billingUnit: InvoiceItemInput["billing_unit"] =
+            item.billing_unit === "12_hours" ? "12_hours" : "day";
+          return {
+            ...item,
+            billing_unit: billingUnit,
+            quantity: item.quantity ?? item.days,
+            unit_price: item.unit_price ?? legacyItem.price_per_day ?? 0,
+            vehicle_id: null,
+          };
+        });
         const id = await saveCloudInvoice({
           ...invoiceData,
           client_id: null,
-          items: invoice.items.map((item) => ({ ...item, vehicle_id: null })),
+          items,
           additional_charges: invoice.additional_charges ?? [],
         });
         const timestamp = new Date().toISOString();
@@ -1148,6 +1184,7 @@ function Index() {
           ...invoice,
           id,
           client_id: null,
+          items,
           createdAt: timestamp,
           updatedAt: timestamp,
         });
@@ -1183,7 +1220,7 @@ function Index() {
           ...item,
           car_type: vehicle.type,
           plate_number: vehicle.plateNumber,
-          price_per_day: vehicle.defaultPrice,
+          unit_price: item.billing_unit === "day" ? vehicle.defaultPrice : item.unit_price,
         };
       }),
     }));
@@ -2176,38 +2213,68 @@ function Index() {
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
+                        {isBoyMakmurInvoice || item.billing_unit === "12_hours" ? (
+                          <label className="space-y-2 text-sm">
+                            <span className="font-medium text-foreground">Skema tarif</span>
+                            <select
+                              value={item.billing_unit}
+                              onChange={(event) =>
+                                updateItem(index, "billing_unit", event.target.value)
+                              }
+                              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                            >
+                              <option value="day">Per hari</option>
+                              <option value="12_hours">Per 12 jam</option>
+                            </select>
+                          </label>
+                        ) : null}
                         <label className="space-y-2 text-sm">
-                          <span className="font-medium text-foreground">Jumlah hari</span>
+                          <span className="font-medium text-foreground">
+                            {item.billing_unit === "12_hours"
+                              ? "Jumlah paket 12 jam"
+                              : "Jumlah hari"}
+                          </span>
                           <input
                             type="number"
                             min={1}
                             max={365}
-                            value={item.days}
-                            onChange={(event) =>
-                              updateItem(index, "days", Number(event.target.value))
-                            }
-                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
-                          />
-                        </label>
-                        <label className="space-y-2 text-sm">
-                          <span className="font-medium text-foreground">Harga per hari</span>
-                          <input
-                            inputMode="numeric"
-                            value={formatRupiahInput(item.price_per_day)}
+                            value={item.billing_unit === "12_hours" ? item.quantity : item.days}
                             onChange={(event) =>
                               updateItem(
                                 index,
-                                "price_per_day",
-                                formatRupiahInput(event.target.value),
+                                item.billing_unit === "12_hours" ? "quantity" : "days",
+                                Number(event.target.value),
                               )
+                            }
+                            className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
+                          />
+                          {item.billing_unit === "12_hours" ? (
+                            <span className="block text-xs text-muted-foreground">
+                              Isi jumlah paket secara manual; tanggal tetap dicatat di atas.
+                            </span>
+                          ) : null}
+                        </label>
+                        <label className="space-y-2 text-sm">
+                          <span className="font-medium text-foreground">
+                            Harga per {billingUnitLabel(item.billing_unit)}
+                          </span>
+                          <input
+                            inputMode="numeric"
+                            value={formatRupiahInput(item.unit_price)}
+                            onChange={(event) =>
+                              updateItem(index, "unit_price", formatRupiahInput(event.target.value))
                             }
                             className="w-full rounded-xl border border-input bg-background px-3 py-2.5 outline-none ring-0 transition focus:border-ring"
                           />
                         </label>
                         <div className="space-y-2 text-sm">
                           <span className="font-medium text-foreground">Total</span>
-                          <div className="flex h-[46px] items-center rounded-xl border border-border bg-background px-3 text-sm font-semibold text-foreground">
-                            {formatRupiah(lineTotal(item.days, item.price_per_day))}
+                          <div className="flex min-h-[46px] flex-col justify-center rounded-xl border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground">
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {formatBillingQuantity(item.quantity, item.billing_unit)} ×{" "}
+                              {formatRupiah(item.unit_price)}
+                            </span>
+                            <span>{formatRupiah(lineTotal(item.quantity, item.unit_price))}</span>
                           </div>
                         </div>
                       </div>
@@ -2232,7 +2299,7 @@ function Index() {
                           ))}
                         </select>
                         <div className="text-sm font-semibold text-foreground">
-                          {formatRupiah(lineTotal(item.days, item.price_per_day))}
+                          {formatRupiah(lineTotal(item.quantity, item.unit_price))}
                         </div>
                       </div>
                     </div>
