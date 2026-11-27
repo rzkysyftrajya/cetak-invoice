@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { listRentalBookings, getSettings, resolveBrandUrls, type RentalBooking } from "@/lib/api";
-import { isExcludedRental, rentalDuration, rentalNetProfit, rentalTotal } from "@/lib/fleet";
+import { isExcludedRental, rentalDuration, rentalNetProfit, rentalNormalCost, rentalTotal } from "@/lib/fleet";
 import { formatRupiah } from "@/lib/invoice";
 import { supabase } from "@/integrations/supabase/client";
 import { WeeklyRentalReportPdf, type WeeklyReportCompany } from "@/components/weekly-rental-report-pdf";
@@ -36,12 +36,7 @@ function escapeCsv(value: unknown) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-const defaultCompany: WeeklyReportCompany = {
-  company_name: "PT VICKY RENTAL NUSANTARA",
-  address: "",
-  phone: "",
-  email: "",
-};
+const defaultCompany: WeeklyReportCompany = { company_name: "PT VICKY RENTAL NUSANTARA", address: "", phone: "", email: "" };
 
 function WeeklyRentalReport() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
@@ -74,11 +69,7 @@ function WeeklyRentalReport() {
     let active = true;
     void supabase.auth.getSession().then(({ data, error: sessionError }) => {
       if (!active) return;
-      if (sessionError || !data.session) {
-        setAuthenticated(false);
-        setLoading(false);
-        return;
-      }
+      if (sessionError || !data.session) { setAuthenticated(false); setLoading(false); return; }
       setAuthenticated(true);
       void loadData();
     });
@@ -86,48 +77,31 @@ function WeeklyRentalReport() {
       if (!active) return;
       setAuthenticated(Boolean(session));
       if (session) void loadData();
-      else {
-        setRentals([]);
-        setLoading(false);
-      }
+      else { setRentals([]); setLoading(false); }
     });
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
-    };
+    return () => { active = false; listener.subscription.unsubscribe(); };
   }, [loadData]);
 
   const cities = useMemo(() => [...new Set(rentals.map((rental) => rental.city).filter(Boolean))].sort((a, b) => a.localeCompare(b, "id")), [rentals]);
-  const reportRentals = useMemo(() => rentals
-    .filter((rental) => rental.start_date >= startDate && rental.start_date <= endDate)
-    .filter((rental) => city === "all" || rental.city === city)
-    .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.customer_name.localeCompare(b.customer_name, "id")), [rentals, startDate, endDate, city]);
+  const reportRentals = useMemo(() => rentals.filter((rental) => rental.start_date >= startDate && rental.start_date <= endDate).filter((rental) => city === "all" || rental.city === city).sort((a, b) => a.start_date.localeCompare(b.start_date) || a.customer_name.localeCompare(b.customer_name, "id")), [rentals, startDate, endDate, city]);
   const activeRentals = useMemo(() => reportRentals.filter((rental) => !isExcludedRental(rental)), [reportRentals]);
   const totals = useMemo(() => ({
     count: activeRentals.length,
     billed: activeRentals.reduce((sum, rental) => sum + rentalTotal(rental), 0),
-    paid: activeRentals.reduce((sum, rental) => sum + rental.paid, 0),
-    remaining: activeRentals.reduce((sum, rental) => sum + Math.max(0, rentalTotal(rental) - rental.paid), 0),
-    operating: activeRentals.reduce((sum, rental) => sum + rental.driver_cost, 0),
-    knownProfit: activeRentals.reduce((sum, rental) => sum + (rentalNetProfit(rental) ?? 0), 0),
+    normalCost: activeRentals.reduce((sum, rental) => sum + (rentalNormalCost(rental) ?? 0), 0),
+    driverCost: activeRentals.reduce((sum, rental) => sum + rental.driver_cost, 0),
+    netProfit: activeRentals.reduce((sum, rental) => sum + (rentalNetProfit(rental) ?? 0), 0),
     missingCost: activeRentals.filter((rental) => rental.normal_rate === null).length,
   }), [activeRentals]);
 
-  function setWeek(weekStart: string) {
-    setStartDate(weekStart);
-    setEndDate(shiftDate(weekStart, 6));
-  }
+  function setWeek(weekStart: string) { setStartDate(weekStart); setEndDate(shiftDate(weekStart, 6)); }
 
   function exportCsv() {
-    const headers = ["Tanggal mulai", "Tanggal selesai", "Kota", "Pelanggan", "WhatsApp", "Mobil", "Nomor polisi", "Layanan", "Rute", "Tagihan", "Deposit", "Dibayar", "Sisa", "Biaya driver", "Keuntungan bersih", "Status rental", "Status pembayaran", "Catatan"];
-    const rows = reportRentals.map((rental) => [rental.start_date, rental.end_date, rental.city, rental.customer_name, rental.whatsapp ?? "", rental.car_type, rental.plate_number, rental.service, rental.route ?? "", rentalTotal(rental), rental.deposit, rental.paid, Math.max(0, rentalTotal(rental) - rental.paid), rental.driver_cost, rentalNetProfit(rental) ?? "Belum dihitung", rental.booking_status, rental.payment_status, rental.notes ?? ""]);
+    const headers = ["Tanggal mulai", "Tanggal selesai", "Pelanggan", "Kota", "Mobil", "Nomor polisi", "Layanan", "Pendapatan", "Harga normal", "Biaya driver", "Profit bersih", "Status rental"];
+    const rows = reportRentals.map((rental) => [rental.start_date, rental.end_date, rental.customer_name, rental.city, rental.car_type, rental.plate_number, rental.service, rentalTotal(rental), rentalNormalCost(rental) ?? "Harga normal belum diisi", rental.driver_cost, isExcludedRental(rental) ? "Dikecualikan" : rentalNetProfit(rental) ?? "Belum dihitung", rental.booking_status]);
     const csv = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\r\n");
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `laporan-rental-${startDate}-${endDate}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const link = document.createElement("a"); link.href = url; link.download = `laporan-profit-rental-${startDate}-${endDate}.csv`; link.click(); URL.revokeObjectURL(url);
   }
 
   if (authenticated === false) return <main className="mx-auto max-w-2xl p-6"><section className="rounded-3xl border border-border bg-white p-8 text-center shadow-card"><h1 className="text-2xl font-bold">Login diperlukan</h1><p className="mt-2 text-muted-foreground">Masuk ke aplikasi untuk membuka laporan rental.</p><Link to="/" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 font-semibold text-white">Kembali ke halaman masuk</Link></section></main>;
@@ -138,7 +112,7 @@ function WeeklyRentalReport() {
         <header className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-[#102747] p-5 text-white shadow-lg sm:p-7">
           <div className="flex items-center gap-4">
             {logo ? <img src={logo} alt={`Logo ${company.company_name}`} className="h-16 w-16 rounded-2xl bg-white p-2 object-contain" /> : <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-2xl font-bold">VR</div>}
-            <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-200">Laporan operasional</p><h1 className="mt-1 text-2xl font-bold sm:text-3xl">Transaksi Rental Mingguan</h1><p className="mt-1 text-sm text-blue-100">{company.company_name}</p></div>
+            <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-200">Laporan operasional</p><h1 className="mt-1 text-2xl font-bold sm:text-3xl">Profit Rental Mingguan</h1><p className="mt-1 text-sm text-blue-100">{company.company_name}</p></div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link to="/" className="rounded-xl border border-white/25 px-4 py-2.5 text-sm font-semibold text-white no-underline hover:bg-white/10">← Aplikasi</Link>
@@ -150,12 +124,8 @@ function WeeklyRentalReport() {
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-            <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Periode laporan</p><h2 className="mt-1 text-xl font-bold">{dateLabel(startDate)} – {dateLabel(endDate)}</h2><p className="mt-1 text-sm text-slate-500">Rental dikelompokkan berdasarkan tanggal mulai, supaya transaksi lintas minggu tidak dihitung dua kali.</p></div>
-            <div className="flex gap-2">
-              <button type="button" aria-label="Minggu sebelumnya" onClick={() => setWeek(shiftDate(startDate, -7))} className="rounded-xl border border-slate-200 px-4 py-2.5 font-semibold hover:bg-slate-50">←</button>
-              <button type="button" onClick={() => setWeek(toISODate(startOfWeek(new Date())))} className="rounded-xl bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-800 hover:bg-blue-100">Minggu ini</button>
-              <button type="button" aria-label="Minggu berikutnya" onClick={() => setWeek(shiftDate(startDate, 7))} className="rounded-xl border border-slate-200 px-4 py-2.5 font-semibold hover:bg-slate-50">→</button>
-            </div>
+            <div><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Periode laporan</p><h2 className="mt-1 text-xl font-bold">{dateLabel(startDate)} – {dateLabel(endDate)}</h2><p className="mt-1 text-sm text-slate-500">Rental dikelompokkan berdasarkan tanggal mulai.</p></div>
+            <div className="flex gap-2"><button type="button" aria-label="Minggu sebelumnya" onClick={() => setWeek(shiftDate(startDate, -7))} className="rounded-xl border border-slate-200 px-4 py-2.5 font-semibold hover:bg-slate-50">←</button><button type="button" onClick={() => setWeek(toISODate(startOfWeek(new Date())))} className="rounded-xl bg-blue-50 px-4 py-2.5 text-sm font-bold text-blue-800 hover:bg-blue-100">Minggu ini</button><button type="button" aria-label="Minggu berikutnya" onClick={() => setWeek(shiftDate(startDate, 7))} className="rounded-xl border border-slate-200 px-4 py-2.5 font-semibold hover:bg-slate-50">→</button></div>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
             <label className="space-y-1.5 text-sm"><span className="font-semibold text-slate-700">Dari tanggal</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5" /></label>
@@ -166,28 +136,29 @@ function WeeklyRentalReport() {
 
         {loading ? <section className="rounded-3xl bg-white p-10 text-center text-slate-500 shadow-sm">Memuat laporan...</section> : error ? <section role="alert" className="rounded-3xl border border-red-200 bg-red-50 p-6 text-red-800">{error}</section> : <>
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-            {[["Transaksi aktif", String(totals.count), "Rental yang masuk rekap"], ["Total tagihan", formatRupiah(totals.billed), "Nilai sewa periode ini"], ["Sudah dibayar", formatRupiah(totals.paid), "Total kumulatif pada catatan"], ["Sisa tagihan", formatRupiah(totals.remaining), "Belum tertagih lunas"], ["Biaya driver", formatRupiah(totals.operating), "Biaya tercatat"]].map(([label, value, caption], index) => <article key={label} className={`rounded-3xl border bg-white p-5 shadow-sm ${index === 0 ? "border-blue-200" : "border-slate-200"}`}><p className="text-sm font-semibold text-slate-500">{label}</p><p className="mt-2 break-words text-2xl font-bold tracking-tight text-slate-900">{value}</p><p className="mt-2 text-xs text-slate-400">{caption}</p></article>)}
+            {[["Transaksi aktif", String(totals.count)], ["Pendapatan", formatRupiah(totals.billed)], ["Harga normal", formatRupiah(totals.normalCost)], ["Operasional driver", formatRupiah(totals.driverCost)]].map(([label, value]) => <article key={label} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-slate-500">{label}</p><p className="mt-2 break-words text-2xl font-bold tracking-tight text-slate-900">{value}</p></article>)}
+            <article className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm"><p className="text-sm font-semibold text-emerald-800">Profit bersih tercatat</p><p className="mt-2 break-words text-2xl font-bold tracking-tight text-emerald-950">{formatRupiah(totals.netProfit)}</p></article>
           </section>
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Rincian</p><h2 className="mt-1 text-xl font-bold">Daftar transaksi</h2></div><div className="text-sm text-slate-500">{reportRentals.length} transaksi · {city === "all" ? "Semua kota" : city}</div></div>
-            <div className="mb-4 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-2"><div><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Laba tercatat*</span><p className="mt-1 text-lg font-bold">{formatRupiah(totals.knownProfit)}</p></div><div className="self-center text-xs leading-5 text-slate-500">* Belum termasuk {totals.missingCost} transaksi yang belum memiliki harga normal dan biaya selain operasional driver.</div></div>
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-700">Rincian</p><h2 className="mt-1 text-xl font-bold">Profit per transaksi</h2></div><div className="text-sm text-slate-500">{reportRentals.length} transaksi · {city === "all" ? "Semua kota" : city}</div></div>
+            {totals.missingCost > 0 && <p className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Harga normal belum diisi pada {totals.missingCost} transaksi aktif. Profit bersih belum mencakup transaksi tersebut.</p>}
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="w-full min-w-[1120px] border-collapse text-left text-sm">
-                <thead className="bg-[#102747] text-xs uppercase tracking-wide text-white"><tr><th className="px-4 py-3">Periode rental</th><th className="px-4 py-3">Pelanggan</th><th className="px-4 py-3">Mobil / plat</th><th className="px-4 py-3">Kota</th><th className="px-4 py-3 text-right">Tagihan</th><th className="px-4 py-3 text-right">Dibayar</th><th className="px-4 py-3 text-right">Sisa</th><th className="px-4 py-3">Status</th></tr></thead>
+              <table className="w-full min-w-[1050px] border-collapse text-left text-sm">
+                <thead className="bg-[#102747] text-xs uppercase tracking-wide text-white"><tr><th className="px-4 py-3">Periode rental</th><th className="px-4 py-3">Pelanggan</th><th className="px-4 py-3">Mobil / plat</th><th className="px-4 py-3">Kota</th><th className="px-4 py-3 text-right">Pendapatan</th><th className="px-4 py-3 text-right">Harga normal</th><th className="px-4 py-3 text-right">Biaya driver</th><th className="px-4 py-3 text-right">Profit bersih</th></tr></thead>
                 <tbody>{reportRentals.map((rental, index) => {
-                  const total = rentalTotal(rental);
-                  const days = rentalDuration(rental.start_date, rental.end_date, rental.rental_mode, rental.start_time, rental.end_time);
                   const excluded = isExcludedRental(rental);
-                  return <tr key={rental.id} className={`border-t border-slate-100 align-top ${index % 2 ? "bg-slate-50/70" : "bg-white"}`}><td className="px-4 py-3"><div className="font-semibold">{dateLabel(rental.start_date, { day: "numeric", month: "short" })} – {dateLabel(rental.end_date, { day: "numeric", month: "short", year: "numeric" })}</div><div className="mt-1 text-xs text-slate-500">{days} hari</div></td><td className="px-4 py-3"><div className="font-semibold">{rental.customer_name}</div><div className="mt-1 text-xs text-slate-500">{rental.whatsapp || "Tanpa nomor WhatsApp"}</div></td><td className="px-4 py-3"><div className="font-semibold">{rental.car_type}</div><div className="mt-1 text-xs text-slate-500">{rental.plate_number} · {rental.service}</div></td><td className="px-4 py-3">{rental.city || "—"}</td><td className="whitespace-nowrap px-4 py-3 text-right font-semibold">{formatRupiah(total)}</td><td className="whitespace-nowrap px-4 py-3 text-right">{formatRupiah(rental.paid)}</td><td className="whitespace-nowrap px-4 py-3 text-right font-semibold">{formatRupiah(Math.max(0, total - rental.paid))}</td><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${rental.booking_status === "Selesai" ? "bg-emerald-100 text-emerald-800" : rental.booking_status === "Dibatalkan" || rental.booking_status === "No Show" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-800"}`}>{rental.booking_status}</span><div className="mt-1 text-xs text-slate-500">{rental.payment_status}{excluded ? " · Tidak masuk ringkasan" : ""}</div></td></tr>;
+                  const profit = rentalNetProfit(rental);
+                  const days = rentalDuration(rental.start_date, rental.end_date, rental.rental_mode, rental.start_time, rental.end_time);
+                  return <tr key={rental.id} className={`border-t border-slate-100 align-top ${index % 2 ? "bg-slate-50/70" : "bg-white"}`}><td className="whitespace-nowrap px-4 py-3"><div className="font-semibold">{dateLabel(rental.start_date, { day: "numeric", month: "short" })} – {dateLabel(rental.end_date, { day: "numeric", month: "short", year: "numeric" })}</div><div className="mt-1 text-xs text-slate-500">{days} hari</div></td><td className="px-4 py-3 font-semibold">{rental.customer_name}</td><td className="px-4 py-3"><div className="font-semibold">{rental.car_type}</div><div className="mt-1 text-xs text-slate-500">{rental.plate_number} · {rental.service}</div></td><td className="px-4 py-3">{rental.city || "—"}</td><td className="whitespace-nowrap px-4 py-3 text-right">{formatRupiah(rentalTotal(rental))}</td><td className="whitespace-nowrap px-4 py-3 text-right">{rentalNormalCost(rental) === null ? <span className="text-amber-700">Belum diisi</span> : formatRupiah(rentalNormalCost(rental) ?? 0)}</td><td className="whitespace-nowrap px-4 py-3 text-right">{formatRupiah(rental.driver_cost)}</td><td className="whitespace-nowrap px-4 py-3 text-right font-bold text-emerald-800">{excluded ? "—" : profit === null ? "Belum dihitung" : formatRupiah(profit)}</td></tr>;
                 })}{reportRentals.length === 0 && <tr><td colSpan={8} className="px-4 py-12 text-center"><div className="text-base font-semibold text-slate-700">Belum ada transaksi pada periode ini</div><p className="mt-1 text-sm text-slate-500">Coba pilih rentang tanggal lain atau semua kota.</p></td></tr>}</tbody>
               </table>
             </div>
-            <p className="mt-4 text-xs leading-5 text-slate-500">Pembayaran pada catatan rental adalah nominal kumulatif, bukan histori uang masuk berdasarkan tanggal. Rental dibatalkan dan no-show tetap tercantum di rincian, tetapi tidak masuk ringkasan finansial.</p>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"><span className="text-sm font-semibold text-slate-600">Rumus: pendapatan − harga normal − biaya driver</span><span className="text-base font-bold text-emerald-800">Profit bersih: {formatRupiah(totals.netProfit)}</span></div>
           </section>
         </>}
         <footer className="px-2 pb-3 text-center text-xs text-slate-400">{company.company_name} · Laporan operasional internal</footer>
       </div>
-      <style>{`@page { size: A4 landscape; margin: 10mm; } @media print { body { background:#fff !important; } .weekly-report { background:#fff !important; padding:0 !important; } .weekly-report > div { max-width:none !important; } .weekly-report button,.weekly-report a { display:none !important; } }`}</style>
+      <style>{`@page { size: A4 landscape; margin: 8mm; } @media print { body { background:#fff !important; } .weekly-report { background:#fff !important; padding:0 !important; } .weekly-report > div { max-width:none !important; } .weekly-report button,.weekly-report a { display:none !important; } }`}</style>
     </main>
   );
 }
