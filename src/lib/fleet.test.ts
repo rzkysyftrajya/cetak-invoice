@@ -59,9 +59,9 @@ const rental: FleetRental = {
 };
 
 describe("fleet calculations", () => {
-  it("recognizes Medan in a city label regardless of case or surrounding text", () => {
-    expect(isMedanCity("Medan")).toBe(true);
-    expect(isMedanCity("Kota Medan, Sumatera Utara")).toBe(true);
+  it("allows rental records for Medan and other cities", () => {
+    expect(isMedanCity("Medan")).toBe(false);
+    expect(isMedanCity("Kota Medan, Sumatera Utara")).toBe(false);
     expect(isMedanCity("Semarang")).toBe(false);
   });
 

@@ -49,8 +49,12 @@ export type FleetRental = {
   created_at: string;
 };
 
-export function isMedanCity(city: string): boolean {
-  return /\bmedan\b/i.test(city.trim());
+/**
+ * Compatibility predicate used by older rental forms to validate city eligibility.
+ * All cities, including Medan, are now accepted for rental records.
+ */
+export function isMedanCity(_city: string): boolean {
+  return false;
 }
 
 function dateTimeValue(date: string, time: string): number | null {
@@ -170,7 +174,6 @@ export function vehicleTaxStatus(taxDate: string | null, today = new Date()): st
   if (!taxDate) return "Belum Diisi";
   const parsed = dateTimeValue(taxDate, "00:00");
   if (parsed === null) return "Belum Diisi";
-  const due = new Date(parsed);
   const current = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const daysRemaining = Math.ceil((parsed - current) / 86_400_000);
   if (daysRemaining < 0) return "Terlambat";
